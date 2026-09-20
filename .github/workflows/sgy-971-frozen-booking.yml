@@ -27,17 +27,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify source ancestry and harness-only changes
+      - name: Verify source ancestry and bounded spike changes
         shell: bash
         run: |
           set -euo pipefail
           git merge-base --is-ancestor "$SOURCE_SHA" "$GITHUB_SHA"
           mkdir -p artifacts
           git diff --name-only "$SOURCE_SHA" "$GITHUB_SHA" | sort > artifacts/changed-files.txt
-          unexpected="$(git diff --name-only "$SOURCE_SHA" "$GITHUB_SHA" -- apps packages Dockerfile package.json yarn.lock || true)"
+          unexpected="$(git diff --name-only "$SOURCE_SHA" "$GITHUB_SHA" -- apps packages Dockerfile package.json yarn.lock | grep -Ev '^(apps/web/app/providers\.tsx|apps/web/pages/_app\.tsx)$' || true)"
           if [[ -n "$unexpected" ]]; then
-            echo "Application-runtime or dependency changes are not allowed in the baseline:"
+            echo "Application-runtime or dependency changes outside the two documented type suppressions are not allowed:"
             echo "$unexpected"
+            exit 1
+          fi
+          source_change_lines="$(git diff --unified=0 "$SOURCE_SHA" "$GITHUB_SHA" -- apps/web/app/providers.tsx apps/web/pages/_app.tsx | grep -E '^[+-]' | grep -Ev '^(\+\+\+|---)' || true)"
+          unexpected_source_lines="$(printf '%s\n' "$source_change_lines" | grep -Ev '^\+[[:space:]]*\{?/\* @ts-expect-error Upstream 39c96bc04d removed this, but frozen SHA fails with TS2786\. \*/\}?$' || true)"
+          if [[ -n "$unexpected_source_lines" ]] || [[ "$(printf '%s\n' "$source_change_lines" | grep -c .)" != "2" ]]; then
+            echo "The frozen-source exception must remain exactly two type-suppression comments."
+            printf '%s\n' "$source_change_lines"
             exit 1
           fi
           git show -s --format='source_sha=%H%ndate=%cI%nsubject=%s' "$SOURCE_SHA" > artifacts/source.txt

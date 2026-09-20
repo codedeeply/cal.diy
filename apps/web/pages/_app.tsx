@@ -17,6 +17,7 @@ function MyApp(props: AppProps) {
   return (
     <SessionProvider session={pageProps.session ?? undefined}>
       <WebPushProvider>
+        {/* @ts-expect-error Upstream 39c96bc04d removed this, but frozen SHA fails with TS2786. */}
         <CacheProvider>
           {Component.PageWrapper ? <Component.PageWrapper {...props} /> : <Component {...pageProps} />}
         </CacheProvider>
