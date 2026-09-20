@@ -7,6 +7,7 @@ on:
       - feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable-yaml-policy
       - feature/sle-118-upgrade-vulnerable-nextjsauthprisma-runtime-dependencies
       - feature/sle-118-auth-security-patch
+      - feature/sle-118-tar-websocket-security-patch
   push:
     branches: [main]
   workflow_dispatch:

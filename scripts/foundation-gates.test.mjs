@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { parse, stringify } from "yaml";
 import { checkPins, checkReport } from "./foundation-gates.mjs";
+
+const checkedWorkflow = readFileSync(".github/workflows/foundation-ci.yml", "utf8");
 
 const image = (findings = []) => ({
   SchemaVersion: 2,
@@ -106,7 +109,7 @@ test("mutable actions/images and privileged workflow shortcuts are rejected", ()
   ]) {
     assert.throws(() => checkPins(pinnedBase, unsafe));
   }
-  checkPins(pinnedBase, `uses: actions/checkout@${"b".repeat(40)}`);
+  checkPins(pinnedBase, checkedWorkflow);
 });
 
 test("CodeQL extension rule references retain the same severity gate", () => {
@@ -136,9 +139,9 @@ const workflowCases = [
   ["event in sequence", 'on: [push, "pull_request_target"]'],
   ["escaped privileged event", 'on: "pull_request_\\u0074arget"'],
   ["escaped runner", 'runs-on: "self-\\u0068osted"'],
-  ["dynamic runner", "runs-on: ${{ inputs.runner }}"],
+  ["dynamic runner", `runs-on: \${{ inputs.runner }}`],
   ["runner group", "runs-on: {group: internal}"],
-  ["escaped secrets", 'env: {TOKEN: "${{ se\\u0063rets.TOKEN }}"}'],
+  ["escaped secrets", `env: {TOKEN: "\${{ se\\u0063rets.TOKEN }}"}`],
   ["inherited secrets", "secrets: inherit"],
   ["secret mapping", "jobs: {test: {secrets: {TOKEN: value}}}"],
   ["duplicate quoted key", `uses: ${pinnedAction}\n"uses": actions/checkout@v5`],
@@ -167,19 +170,231 @@ for (const [name, workflow] of workflowCases) {
 }
 
 test("structural workflow policy accepts decoded pinned actions and hosted jobs", () => {
-  for (const workflow of [
-    `steps: [{"uses": "${pinnedAction}"}]`,
-    `steps: [{"u\\u0073es": "${pinnedAction}"}]`,
-    `uses: >-\n  ${pinnedAction}`,
-    `jobs: {test: {runs-on: ubuntu-24.04, steps: [{uses: ${pinnedAction}}]}}`,
-    `jobs: {secrets: {runs-on: ubuntu-24.04, steps: [{uses: ${pinnedAction}}]}}`,
+  const checkout = "uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5";
+  for (const replacement of [
+    `"uses": "${pinnedAction}"`,
+    `"u\\u0073es": "${pinnedAction}"`,
+    `uses: >-\n          ${pinnedAction}`,
     `uses: owner/repo/path/to/action@${"c".repeat(40)}`,
-    `on: [push, pull_request]\nuses: ${pinnedAction}`,
   ]) {
-    checkPins(pinnedBase, workflow);
+    assert.ok(checkedWorkflow.includes(checkout));
+    checkPins(pinnedBase, checkedWorkflow.replace(checkout, replacement));
   }
 });
 
 test("checked-in workflow and Dockerfile satisfy the structural policy", () => {
   checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(".github/workflows/foundation-ci.yml", "utf8"));
+});
+
+const scopeCases = [
+  [
+    "missing root permissions",
+    (w) => {
+      delete w.permissions;
+    },
+  ],
+  [
+    "root write grant",
+    (w) => {
+      w.permissions.contents = "write";
+    },
+  ],
+  [
+    "root write-all",
+    (w) => {
+      w.permissions = "write-all";
+    },
+  ],
+  [
+    "root read-all",
+    (w) => {
+      w.permissions = "read-all";
+    },
+  ],
+  [
+    "root empty mapping",
+    (w) => {
+      w.permissions = {};
+    },
+  ],
+  [
+    "root null",
+    (w) => {
+      w.permissions = null;
+    },
+  ],
+  [
+    "root expression",
+    (w) => {
+      w.permissions = `\${{ inputs.permissions }}`;
+    },
+  ],
+  [
+    "extra root grant",
+    (w) => {
+      w.permissions["id-token"] = "write";
+    },
+  ],
+  [
+    "unknown root permission",
+    (w) => {
+      w.permissions.future = "read";
+    },
+  ],
+  [
+    "missing CodeQL grant",
+    (w) => {
+      delete w.jobs.codeql.permissions;
+    },
+  ],
+  [
+    "CodeQL events read",
+    (w) => {
+      w.jobs.codeql.permissions["security-events"] = "read";
+    },
+  ],
+  [
+    "CodeQL contents write",
+    (w) => {
+      w.jobs.codeql.permissions.contents = "write";
+    },
+  ],
+  [
+    "CodeQL extra grant",
+    (w) => {
+      w.jobs.codeql.permissions.checks = "write";
+    },
+  ],
+  [
+    "step permissions",
+    (w) => {
+      w.jobs.quality.steps[0].permissions = { contents: "read" };
+    },
+  ],
+  [
+    "workflow condition",
+    (w) => {
+      w.if = "success()";
+    },
+  ],
+  [
+    "false step condition",
+    (w) => {
+      w.jobs.quality.steps[2].if = false;
+    },
+  ],
+  [
+    "null step condition",
+    (w) => {
+      w.jobs.quality.steps[2].if = null;
+    },
+  ],
+  [
+    "expression step condition",
+    (w) => {
+      w.jobs.quality.steps[2].if = `\${{ false }}`;
+    },
+  ],
+  [
+    "always executable step",
+    (w) => {
+      w.jobs.quality.steps[2].if = "always()";
+    },
+  ],
+  [
+    "eligibility skipped",
+    (w) => {
+      w.jobs.eligibility.if = false;
+    },
+  ],
+  [
+    "eligibility condition removed",
+    (w) => {
+      delete w.jobs.eligibility.if;
+    },
+  ],
+  [
+    "upload skipped",
+    (w) => {
+      w.jobs.artifact.steps.at(-1).if = "failure()";
+    },
+  ],
+  [
+    "upload condition removed",
+    (w) => {
+      delete w.jobs.artifact.steps.at(-1).if;
+    },
+  ],
+  [
+    "conditional upload with executable run",
+    (w) => {
+      w.jobs.artifact.steps.at(-1).run = "true";
+    },
+  ],
+  [
+    "missing required job",
+    (w) => {
+      delete w.jobs.quality;
+    },
+  ],
+  [
+    "extra job",
+    (w) => {
+      w.jobs.extra = structuredClone(w.jobs.quality);
+    },
+  ],
+  [
+    "empty required steps",
+    (w) => {
+      w.jobs.quality.steps = [];
+    },
+  ],
+];
+for (const id of ["quality", "secrets", "artifact", "eligibility"]) {
+  scopeCases.push([
+    `${id} unauthorized grant`,
+    (w) => {
+      w.jobs[id].permissions = { contents: "write" };
+    },
+  ]);
+}
+for (const id of ["quality", "secrets", "codeql", "artifact"]) {
+  scopeCases.push([
+    `${id} conditional job`,
+    (w) => {
+      w.jobs[id].if = "always()";
+    },
+  ]);
+}
+for (const [name, mutate] of scopeCases) {
+  test(`workflow scope policy rejects ${name}`, () => {
+    const workflow = parse(checkedWorkflow);
+    mutate(workflow);
+    assert.throws(() => checkPins(pinnedBase, stringify(workflow)));
+  });
+}
+
+test("workflow scope policy accepts only explicit read inheritance outside CodeQL", () => {
+  const workflow = parse(checkedWorkflow);
+  for (const [id, job] of Object.entries(workflow.jobs)) {
+    if (id !== "codeql") job.permissions = { contents: "read" };
+  }
+  checkPins(pinnedBase, stringify(workflow));
+});
+
+test("workflow scope policy decodes quoted and escaped permission and condition keys", () => {
+  const valid = checkedWorkflow.replace("permissions:", '"permi\\u0073sions":');
+  checkPins(pinnedBase, valid);
+  assert.throws(() => checkPins(pinnedBase, valid.replace("contents: read", '"contents": write')));
+  assert.throws(() => checkPins(pinnedBase, `${valid}\n"i\\u0066": false\n`));
+});
+
+test("local validation alone cannot authenticate its own invocation or implementation", () => {
+  // This passing tamper case must remain documented as an external-enforcement blocker.
+  const removed = checkedWorkflow.replace(
+    "node scripts/foundation-gates.mjs pins .github/workflows/foundation-ci.yml",
+    "true"
+  );
+  assert.notEqual(removed, checkedWorkflow);
+  checkPins(pinnedBase, removed);
 });

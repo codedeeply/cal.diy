@@ -83,6 +83,71 @@ function checkReport(kind, report) {
   }
 }
 
+/** Explicit scopes prevent inherited token grants and conditional gate skipping. */
+function checkWorkflowScopes(root) {
+  const jobs = root.get("jobs");
+  const requiredJobs = ["quality", "secrets", "codeql", "artifact", "eligibility"];
+  if (
+    !(jobs instanceof Map) ||
+    jobs.size !== requiredJobs.length ||
+    requiredJobs.some((id) => !jobs.has(id))
+  ) {
+    throw new Error("Expected exactly the five Foundation jobs");
+  }
+  const permissionScopes = new Set([root]);
+  const conditionScopes = new Set();
+  const checkPermissions = (value, expected) => {
+    if (
+      !(value instanceof Map) ||
+      value.size !== expected.length ||
+      expected.some(([key, grant]) => value.get(key) !== grant)
+    ) {
+      throw new Error("Unapproved workflow permissions");
+    }
+  };
+  checkPermissions(root.get("permissions"), [["contents", "read"]]);
+  for (const [id, job] of jobs) {
+    if (!(job instanceof Map)) throw new Error("Invalid Foundation job");
+    permissionScopes.add(job);
+    if (id === "codeql") {
+      checkPermissions(job.get("permissions"), [
+        ["contents", "read"],
+        ["security-events", "write"],
+      ]);
+    } else if (job.has("permissions")) {
+      checkPermissions(job.get("permissions"), [["contents", "read"]]);
+    }
+    if (id === "eligibility") {
+      if (job.get("if") !== "always()") throw new Error("Eligibility must always evaluate dependencies");
+      conditionScopes.add(job);
+    }
+    const steps = requireArray(job.get("steps"), "Foundation steps");
+    if (!steps.length) throw new Error("Empty Foundation job");
+    for (const step of steps) {
+      if (!(step instanceof Map)) throw new Error("Invalid Foundation step");
+      // Diagnostic uploads must still run after a scan fails; executable gates may not be conditional.
+      if (
+        step.get("uses") === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" &&
+        !step.has("run")
+      ) {
+        if (step.get("if") !== "always()") throw new Error("Evidence upload must always run");
+        conditionScopes.add(step);
+      }
+    }
+  }
+  const pending = [root];
+  while (pending.length) {
+    const value = pending.pop();
+    if (value instanceof Map) {
+      if (value.has("permissions") && !permissionScopes.has(value))
+        throw new Error("Invalid permissions scope");
+      if (value.has("if") && !conditionScopes.has(value))
+        throw new Error("Conditional Foundation execution is forbidden");
+      pending.push(...value.values());
+    } else if (Array.isArray(value)) pending.push(...value);
+  }
+}
+
 /** Pin executable inputs so a passing review cannot silently select different upstream code. */
 function checkPins(dockerfile, workflow) {
   const stages = new Set();
@@ -140,6 +205,7 @@ function checkPins(dockerfile, workflow) {
       }
     }
   }
+  checkWorkflowScopes(root);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

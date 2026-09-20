@@ -54,6 +54,63 @@ database. It publishes no ports, image, tag, deployment, signature or release.
 It refuses existing task resources and cleans up only resources it creates.
 No production or real integration credentials are available to these jobs.
 
+## Permission hardening and unresolved trusted enforcement
+
+The follow-up validator requires exactly the five Foundation jobs, root
+`contents: read`, and exactly `contents: read` plus `security-events: write`
+for CodeQL. Other jobs inherit the root grant or explicitly set only
+`contents: read`. All other permission mappings, scalar shorthands and invalid
+scopes are rejected. This does not change the workflow's actual token grants.
+
+Workflow, ordinary job and executable-step conditions are rejected. The only
+allowed conditions are the existing literal `always()` on eligibility and the
+pinned diagnostic artifact uploads. Those conditions are mandatory: failed
+scans must retain evidence, and failed dependencies must still be evaluated.
+No security threshold, scanner disposition or dependency changes here.
+
+**This is defense in depth, not tamper-resistant merge enforcement.** A PR still
+controls the workflow and validator. The regression suite deliberately records
+that removing the validator invocation is not detected by its own local check.
+CodeRabbit's trusted-enforcement finding therefore remains open:
+https://github.com/codedeeply/cal.diy/pull/5#discussion_r4057260938
+
+On 2026-09-20, repository readback showed a public personal repository and
+Foundation required-check contexts bound to GitHub Actions app 15368. That binds
+the producer app, not the workflow path or trusted source revision. Adding a
+same-app `pull_request_target` check alone is not a demonstrated fix. PR content
+must never be executed in a privileged trusted-policy job.
+
+### Sierra decision required before deploying trusted enforcement
+
+Proposed routes (neither is approved or deployed):
+
+1. Keep the current owner and use a separately authenticated policy-check App,
+   with credentials unavailable to PR jobs and policy hosted outside PR control.
+   Define hosting, credential custody, exact least-privilege permissions, recovery
+   and monthly maintenance cost before requesting installation authority.
+2. If Sierra separately chooses organization ownership and an eligible plan,
+   evaluate organization-required workflows pinned to protected policy source.
+   Do not transfer the repository or change billing to obtain this capability.
+
+The trusted evaluator must read exact-head/merge workflow and relevant policy
+inputs as bounded data; execute only approved immutable policy; reject missing
+or replaced validation, unauthorized permissions, new executable workflows,
+and conditional gate skipping; bind the verdict to the exact candidate and
+trusted policy revision; and require fresh evaluation after either changes.
+An App route must bind the required check to that distinct App identity.
+Missing, stale or unavailable trusted evidence must block, not waive, merge.
+Bootstrap must use reviewed PRs and preserve all existing required checks.
+
+Before closing the finding, demonstrate that a PR removing validation, editing
+the validator or adding a same-name passing check still cannot merge. Do not
+perform a merge attempt or enable a privileged event as an unapproved probe.
+All current draft/security/signing/recovery restrictions remain in effect.
+
+GitHub documentation reviewed for this design boundary:
+- https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
+- https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-workflows-to-pass-before-merging
+- https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target
+
 ## Remaining SLE-119 acceptance
 
 This bootstrap is intentionally not the complete signed-release pipeline:
