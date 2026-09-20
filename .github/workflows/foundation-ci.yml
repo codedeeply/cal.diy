@@ -1,7 +1,10 @@
 name: Foundation CI
 on:
   pull_request:
-    branches: [main, feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable]
+    branches:
+      - main
+      - feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable
+      - feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable-yaml-policy
   push:
     branches: [main]
   workflow_dispatch:
@@ -44,7 +47,7 @@ jobs:
       - name: Validate workflow and negative gate fixtures
         run: |
           node scripts/foundation-gates.mjs pins .github/workflows/foundation-ci.yml
-          node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs
+          node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs scripts/next-security-regression.test.mjs
           docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 .github/workflows/foundation-ci.yml
           docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 scripts/foundation-image.sh
       - name: Forced type check
