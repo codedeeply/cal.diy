@@ -9,6 +9,7 @@ on:
       - feature/sle-118-auth-security-patch
       - feature/sle-118-tar-websocket-security-patch
       - feature/sle-119-ci-permissions-hardening
+      - feature/sle-118-booking-authorization-repair
   push:
     branches: [main]
   workflow_dispatch:
@@ -62,7 +63,7 @@ jobs:
       - name: Validate workflow and negative gate fixtures
         run: |
           node scripts/foundation-gates.mjs pins .github/workflows/foundation-ci.yml
-          node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs scripts/next-security-regression.test.mjs scripts/auth-security-regression.test.mjs scripts/transitive-security-regression.test.mjs scripts/embed-build-copy.test.mjs
+          node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs scripts/next-security-regression.test.mjs scripts/auth-security-regression.test.mjs scripts/transitive-security-regression.test.mjs scripts/embed-build-copy.test.mjs scripts/foundation-secret-dispositions.test.mjs
           docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 .github/workflows/foundation-ci.yml
           docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 scripts/foundation-image.sh
       - name: Forced type check
@@ -94,8 +95,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/scan" "$RUNNER_TEMP/secret-evidence"
           git archive HEAD | tar -x -C "$RUNNER_TEMP/scan"
-          docker run --rm -v "$RUNNER_TEMP/scan:/scan:ro" -v "$RUNNER_TEMP/secret-evidence:/out" ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb dir /scan --redact --report-format json --report-path /out/gitleaks.json
-          node scripts/foundation-gates.mjs gitleaks "$RUNNER_TEMP/secret-evidence/gitleaks.json"
+          test ! -e "$RUNNER_TEMP/secret-evidence/gitleaks.json"
+          scan_status=0
+          docker run --rm -v "$RUNNER_TEMP/scan:/scan:ro" -v "$RUNNER_TEMP/secret-evidence:/out" ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb dir /scan --redact --report-format json --report-path /out/gitleaks.json || scan_status=$?
+          node scripts/foundation-gates.mjs gitleaks "$RUNNER_TEMP/secret-evidence/gitleaks.json" "$scan_status" "$RUNNER_TEMP/scan"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

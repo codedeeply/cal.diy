@@ -31,12 +31,41 @@ and failure on missing input. No package or lockfile change is required.
 
 ## Fail-closed boundary
 
-No inherited-finding inventory or security exception is approved. Raw high and
+No inherited-vulnerability allowance is approved. Raw high and
 critical image/configuration findings block; unknown severities, malformed reports,
-CodeQL scores >=7 and any Gitleaks finding also block. Fixability does not erase a
+CodeQL scores >=7 and undispositioned Gitleaks findings also block. Fixability does not erase a
 finding. Known application criticals therefore keep this bootstrap red. A false
 positive or source-only inherited allowance needs Sierra's explicit A2 decision
 and a separately reviewed, machine-readable inventory; do not weaken this gate.
+
+### Sierra-approved exact-source non-credentials
+
+Approval: https://linear.app/sam-thacker-studios/issue/SLE-119#comment-25139d3e-d446-4eae-922b-207f3da8d002
+
+The 167-row `noncredential-dispositions.tsv` is a deterministic projection of the
+published proposal SHA256 `b5688e00b1956bc0f32f37a2bcdd605e157dff41459c3c543cf0c65ae0fed190`.
+One row binds rule, full location, source-file SHA256 and proof classification/key/revision.
+Proofs: 162 current and two historical translation checksums, two UI labels and
+one non-parseable literal mock key. Full proof metadata remains on the approved
+Linear attachment; no credential values are included. `noncredential-approval.json`
+binds its exact inventory hash to Sierra, SLE-119 and expiry **2026-10-20 00:00 UTC**.
+The evaluator pins that approval's bytes; changing proof data, scope or expiry
+requires a new explicit Sierra decision and reviewed policy update, not an LLM waiver.
+
+The pinned scanner still scans the whole tracked archive without exclusions.
+Its finding exit status 1 is captured so the evaluator can run; other failures,
+missing/malformed evidence and inconsistent status/report pairs fail closed.
+Matching uses bytes from that same scanned archive, rejects symlinked source,
+and consumes each exact finding identity only once. Changed source invalidates
+its proof; missing/changed approval, inventory or expired policy fails closed.
+Counts distinguish `total`, `dispositioned` and `blocking`; raw redacted reports
+are retained unchanged. The recorded 206-finding report yields 167 dispositions
+and **39 blockers**, not a passing gate. New and unmatched findings always block.
+
+Reproduce: `node --test scripts/foundation-secret-dispositions.test.mjs`.
+For a real pinned-scanner report: `node scripts/foundation-gates.mjs gitleaks REPORT SCANNER_EXIT SCANNED_ROOT`.
+This does not resolve independent CI trust, vulnerabilities, CodeQL, signing or
+recovery. All existing draft/merge/production boundaries remain in force.
 
 Negative fixtures prove report rejection, including deliberately unsafe image,
 action, secret, vulnerability and CodeQL inputs. They do not substitute for real

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import { evaluateGitleaks } from "./foundation-secret-dispositions.mjs";
 
 /** Missing or malformed evidence must not turn a security check green. */
 function requireArray(value, label) {
@@ -9,7 +10,7 @@ function requireArray(value, label) {
   return value;
 }
 
-/** No inherited-finding allowance is approved; raw high/critical findings remain blocking. */
+/** General report evaluation never infers an approval from a finding's own fields. */
 function checkReport(kind, report) {
   if (kind === "gitleaks") {
     if (requireArray(report, "Gitleaks findings").length) throw new Error("Gitleaks findings require review");
@@ -212,6 +213,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const [kind, file] = process.argv.slice(2);
   if (kind === "pins") {
     checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(file, "utf8"));
+  } else if (kind === "gitleaks") {
+    const result = evaluateGitleaks(
+      JSON.parse(readFileSync(file, "utf8")),
+      Number(process.argv[4]),
+      process.argv[5]
+    );
+    console.log(JSON.stringify(result));
+    if (result.blocking) throw new Error("Undispositioned Gitleaks findings block eligibility");
   } else {
     checkReport(kind, JSON.parse(readFileSync(file, "utf8")));
   }
