@@ -1,5 +1,42 @@
 # SLE-118: bounded runtime dependency remediation
 
+## Approved follow-up: booking authorization
+
+Sierra separately approved the bounded booking-authorization repair and regression
+tests on 2026-09-20. No schema, dependency, secret, merge or production change is
+authorized by that approval:
+https://linear.app/sam-thacker-studios/issue/SLE-118/upgrade-vulnerable-nextjsauthprisma-runtime-dependencies-with#comment-f92dea9e-c549-4e05-bf39-b8f85e80db8c
+
+`BookingAccessService` previously used a local permission stub returning `true`.
+This fork has no PBAC implementation: administrative access now requires a real,
+accepted ADMIN/OWNER membership in the event's team or its parent organization.
+The same check applies to managed events. Personal bookings require the organizer's
+accepted team/org membership as well as the requester's administrative membership.
+Organizer and participating-host access is preserved. An attendee, unused host-pool
+member, pending invitee or unrelated organization's admin gains no access by that
+status alone. No other permission service or authentication policy is changed.
+
+The new `BookingAccessService.integration-test.ts` uses actual Prisma, repositories
+and permission checks, not the old unit test's private permission mock. Its 48
+cases cover team/managed/personal bookings, allowed roles, denied roles, pending
+memberships on both sides, immediate revocation/demotion, UID/ID lookup, missing
+bookings/organizers, legacy participating hosts and non-organization parents.
+The unchanged implementation fails 22 of these cases; the repair passes all 48.
+
+Foundation quality applies existing migrations to a fresh pinned PostgreSQL 16
+service and explicitly runs the integration file with `VITEST_MODE=integration`
+and `--passWithNoTests=false`. The fixture refuses any database except
+`sle118_authz_test` on loopback or the task's disposable database hostname; cleanup
+targets only IDs created by that run. No production credentials or network calls
+are needed. Existing quality, security, review and eligibility gates are retained.
+
+This is service-level authorization evidence, not a complete HTTP exploit test or
+the general session/booking smoke harness. Those previously published local proofs
+remain identified separately. The repair is a single focused dependent diff from
+PR #10 (`a651b04`), not an expansion of that nearly-full CI PR or a stack rewrite.
+Reverting this repair would restore the known bypass and is not a safe operational
+rollback. No database-format change is involved; any rollback still needs Sierra.
+
 Status: implementation draft, R1 / A2, assigned to Sierra. Approval B authorizes
 the scoped implementation and isolated tests, not merge or production. Hosted
 Cal.com remains production. No real integrations, new schema/migration, security
