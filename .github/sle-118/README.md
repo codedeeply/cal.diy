@@ -126,3 +126,62 @@ Foundation CI explicitly runs the Node regressions and permits this dependent
 PR's exact base branch. No gate or vulnerability finding is suppressed. The whole
 graph, image, Gitleaks and CodeQL gates still apply; tar/websocket remediation,
 remaining security findings and prerequisite PR #5 review blockers remain open.
+
+## Third patch: archive and WebSocket transitive dependencies
+
+The existing global `tar` resolution advances from 7.5.11 to **7.5.21**. Sierra
+explicitly approved replacing the earlier 7.5.19 target after a fresh advisory
+check found a remaining high-severity member-selection recursion flaw:
+https://linear.app/sam-thacker-studios/issue/SLE-118/upgrade-vulnerable-nextjsauthprisma-runtime-dependencies-with#comment-36651ee2-450d-4fc3-bd64-4a6e1d36504d
+https://github.com/advisories/GHSA-r292-9mhp-454m
+
+Tar's earlier critical decompression fix starts in 7.5.19. The selected 7.5.21
+also includes complete decompressor disposal on abort and bounded recursion.
+Node >=18 and dependency ranges are unchanged between those target patches.
+The existing major-version override is not expanded to other packages.
+https://github.com/advisories/GHSA-23hp-3jrh-7fpw
+https://github.com/isaacs/node-tar/compare/v7.5.19...v7.5.21
+
+The full 7.5.11→7.5.21 series also changes symlink/hardlink protection, PAX
+header handling and archive-creation error propagation. The bounded regressions
+below do not claim exhaustive verification of every upstream repair:
+https://github.com/isaacs/node-tar/compare/v7.5.11...v7.5.21
+
+`yarn why -R tar` identifies node-gyp/cacache, sqlite3 (through SAML Jackson),
+trigger.dev and giget consumers, with workspace/tooling paths feeding those
+parents. These remain installed; no parent is replaced or removed. Regression
+tests assert the whole locked tar graph and representative installed consumer
+paths, normal archive creation/listing and async/sync selected extraction.
+
+`websocket-driver` advances from 0.7.4 to **0.7.5** using the scoped resolution
+`faye-websocket/websocket-driver`, satisfying its existing `>=0.5.1` range. The
+observed path is Salesforce → jsforce 3.10.10 → Faye 1.4.0 → faye-websocket
+0.11.4 → websocket-driver. No real Salesforce connection is made. Tests resolve
+the driver through that actual installed parent chain rather than a new direct
+dependency. Both legacy length-header bounds and post-extension message-size
+checks are exercised, alongside ordinary text/binary/ping behavior.
+https://github.com/advisories/GHSA-xv26-6w52-cph6
+https://github.com/faye/websocket-driver-node/releases/tag/0.7.5
+
+`scripts/transitive-security-regression.test.mjs` runs explicitly in Foundation
+CI. Decompression uses an eight-MiB memory-only payload; long-path archives stay
+under 32 KiB and run in time/memory-bounded child processes. Filesystem fixtures
+are unique disposable directories; WebSocket transports are in-memory streams.
+These tests must fail on the vulnerable comparison versions and pass on the
+approved graph. No real integration, oversized disk workload or production
+resource is involved.
+
+Compatibility cautions: tar now rejects compressed input over its default
+1000:1 expansion ratio. Member selection caps ancestor recursion at 100 levels,
+so exceptionally deep selections may be skipped. Do not disable either guard
+to accommodate an archive without a new security decision. Library fixes do
+not impose a universal archive disk/entry quota or application payload policy.
+Full isolated builds, runtime/recovery proof and all whole-tree/image gates
+remain required; these bounded tests alone do not complete SLE-118.
+
+The immediate comparison baseline is Auth PR #8 head
+`9d9fe18272d257e73ce378cd4f37d9abb322adef`. A reviewed development revert restores
+the previous root resolutions and lockfile; the old vulnerable graph is not an
+approved production rollback target. Schema, auth behavior and migrations stay
+unchanged. Keep this dependent PR draft until genuinely review-ready; Sierra's
+R1 merge approval is still mandatory.
