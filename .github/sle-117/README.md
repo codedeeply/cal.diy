@@ -6,18 +6,21 @@ required PR checks, artifact signing and publication. Do not waive those gates t
 
 ## Image boundaries
 
-The Dockerfile pins Node 24.21.0 and Debian Bookworm image digests. The build uses the target
+The Dockerfile pins Node 24.21.0 and Debian Trixie image digests. The build uses the target
 architecture so native modules match the final linux/amd64 image. All workspace manifests are
 present for `yarn install --immutable`; the existing Yarn 4.12.0 and lockfile remain authoritative.
 
 `runner` uses Next.js standalone output and UID 1000 (`node`). Build dependencies and package
-managers are excluded. Only the Next.js server configuration, output/cache and public assets are writable for the
-existing URL-substitution mechanism. OpenSSL and CA certificates are explicitly versioned
+managers are excluded. Served assets and application code stay root-owned; only the Next.js cache
+is writable. Public URL substitution happens at build time using `--build-arg NEXT_PUBLIC_WEBAPP_URL`.
+Startup rejects a different runtime URL against a root-owned record, even if the legacy
+`BUILT_NEXT_PUBLIC_WEBAPP_URL` environment value is overridden. Changing the public origin requires
+a reviewed rebuild, not a mutable runtime image. OpenSSL and CA certificates are explicitly versioned
 because Prisma's existing native engine requires OpenSSL in the slim base.
 
 The exact OS package pins were resolved with `apt-cache policy` and successfully installed in
-the linux/amd64 runtime-base build on 2026-09-20: OpenSSL/libssl3 `3.0.20-1~deb12u2` and
-CA certificates `20250419~deb12u1`. If a repository retires these versions, the build intentionally
+the linux/amd64 runtime-base build on 2026-09-20: OpenSSL/libssl3t64 `3.5.7-1~deb13u2` and
+CA certificates `20250419`. If a repository retires these versions, the build intentionally
 fails rather than silently changing its security inputs. Update pins through a reviewed PR;
 do not remove them to accept arbitrary future package versions.
 
@@ -41,7 +44,8 @@ Do not publish a registry tag or expose a public port during these checks.
    files, and `node --test scripts/check-platform-scan.test.mjs`. Run the maintenance target with
    `DATABASE_URL` and `DATABASE_DIRECT_URL` pointing only to the disposable database.
 3. Start the runner against that database. Verify `process.getuid()` is 1000, architecture is
-   amd64, its health check succeeds, static assets load, and URL replacement works as non-root.
+   amd64, its health check succeeds, static assets load, and the baked URL is correct. Verify code
+   and public assets are not writable, the cache is writable, and a runtime URL mismatch fails.
    Assert package managers and build CLIs are absent. Booking proof remains SLE-122's work.
 4. Generate a CycloneDX SBOM and full Trivy report for the exact final image. Keep the original
    SGY-971 report and scan timestamp; distinguish historical counts from a same-database rescan.
