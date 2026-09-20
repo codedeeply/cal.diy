@@ -1,6 +1,38 @@
+import process from "node:process";
 import { IdentityProvider, UserPermissionRole } from "@calcom/prisma/enums";
+import type { EmailConfig } from "next-auth/providers/email";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorCode } from "./ErrorCode";
+
+describe("dependency-patch auth configuration contract", () => {
+  it("preserves JWT sessions and the existing magic-link lifetime", async () => {
+    const { getOptions } = await import("./next-auth-options");
+    const options = getOptions({ getDubId: () => undefined, getTrackingData: () => ({}) });
+    expect(options.session?.strategy).toBe("jwt");
+    const provider = options.providers.find((candidate) => candidate?.type === "email");
+    expect(provider).toBeDefined();
+    if (!provider || provider.type !== "email") throw new Error("Email provider missing");
+    expect(provider.maxAge).toBe(36_000);
+    expect(provider.normalizeIdentifier).toBeUndefined();
+  });
+
+  it("allows application callbacks and rejects foreign/lookalike hosts", async () => {
+    const { getOptions } = await import("./next-auth-options");
+    const { callbacks } = getOptions({ getDubId: () => undefined, getTrackingData: () => ({}) });
+    const redirect = callbacks?.redirect;
+    if (!redirect) throw new Error("Redirect callback missing");
+    const baseUrl = "http://localhost:3000";
+    expect(await redirect({ url: "/bookings", baseUrl })).toBe(`${baseUrl}/bookings`);
+    expect(await redirect({ url: `${baseUrl}/bookings`, baseUrl })).toBe(`${baseUrl}/bookings`);
+    for (const url of [
+      "https://attacker.test/",
+      "https://localhost.attacker.test/",
+      "https://localhost@attacker.test/",
+    ]) {
+      expect(await redirect({ url, baseUrl })).toBe(baseUrl);
+    }
+  });
+});
 
 // Mock dependencies
 vi.mock("@calcom/prisma", () => ({
@@ -193,7 +225,9 @@ vi.mock("../signup/utils/getOrgUsernameFromEmail", () => ({
 
 vi.mock("next-auth/providers/azure-ad", () => ({ default: vi.fn() }));
 vi.mock("next-auth/providers/credentials", () => ({ default: vi.fn(() => ({ id: "credentials" })) }));
-vi.mock("next-auth/providers/email", () => ({ default: vi.fn() }));
+vi.mock("next-auth/providers/email", () => ({
+  default: vi.fn((options: Partial<EmailConfig>) => ({ id: "email", ...options })),
+}));
 vi.mock("next-auth/providers/google", () => ({ default: vi.fn() }));
 
 describe("CredentialsProvider authorize", () => {

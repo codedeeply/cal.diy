@@ -80,3 +80,49 @@ Sierra's explicit R1 merge approval, tested rollback and all deterministic gates
 are still required. This first patch does not complete SLE-118 or authorize
 SLE-119 artifact publication. Track agent/CI time separately from Sierra minutes;
 the maintenance target remains 3–6 Sierra hours/month.
+
+## Second patch: NextAuth v4 security repair
+
+Both `apps/web` and `packages/features/auth` pin next-auth **4.24.15**, replacing
+4.24.13. The only coupled lockfile addition is its required UUID 11.1.1 dependency;
+other UUID consumers stay unchanged. No Prisma, React, auth callback, schema,
+migration or runtime policy edit is included. Approval B covers this patch;
+Approval A does not, so the executable magic-link lifetime stays **36,000 seconds
+(10 hours)**. The existing misleading source comment is not authority to shorten it.
+
+The upstream patch repairs normalization-before-validation of email identifiers,
+malformed percent-encoded Bearer handling and provider binding of state/nonce/PKCE:
+https://github.com/advisories/GHSA-7rqj-j65f-68wh
+https://github.com/advisories/GHSA-xmf8-cvqr-rfgj
+https://github.com/advisories/GHSA-x445-f3h2-j279
+https://github.com/nextauthjs/next-auth/releases/tag/next-auth@4.24.15
+
+**Upgrade behavior:** OAuth sign-ins started before the patch have unbound check
+cookies and must restart after upgrading. Do not bypass the provider binding to
+accept legacy cookies. Existing JWT sessions are tested separately. No real
+OAuth provider, email transport or user data is used during these tests.
+
+`scripts/auth-security-regression.test.mjs` exercises the installed vendor code:
+version pins, malformed Bearer rejection, JWT validity/expiry, OAuth check-cookie
+round trips and negative cases, Unicode email normalization, hashed single-use
+magic links, expiry/identifier rejection, denied sign-in and CSRF verification.
+The in-memory token adapter models atomic consumption; it does not prove actual
+Prisma concurrency or database recovery. Application tests additionally assert
+the configured lifetime, default normalizer, JWT strategy, callback host checks
+and existing Secure/HttpOnly/SameSite/path/domain cookie behavior. Existing
+credential/2FA/account-linking tests remain required.
+
+These are bounded regressions, not complete OAuth endpoint, tenant-isolation or
+database/rollback proof. In particular, the current redirect callback compares
+hostname, not full origin; this patch does not tighten scheme/port policy. Existing
+embed cookies use SameSite=None in HTTPS. Neither behavior is newly approved or
+waived. Further threat review and isolated runtime/database checks remain before
+merge. The immediate Auth comparison baseline is
+`3c247747fce22258c6744fc140fa05c728c1b90a` (draft PR #6), not a production rollback
+target. Restore both auth manifests and their lockfile through a reviewed revert
+for development comparison only; the old version is vulnerable.
+
+Foundation CI explicitly runs the Node regressions and permits this dependent
+PR's exact base branch. No gate or vulnerability finding is suppressed. The whole
+graph, image, Gitleaks and CodeQL gates still apply; tar/websocket remediation,
+remaining security findings and prerequisite PR #5 review blockers remain open.
