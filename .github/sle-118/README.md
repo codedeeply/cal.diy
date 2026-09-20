@@ -13,7 +13,8 @@ https://linear.app/sam-thacker-studios/issue/SLE-118/upgrade-vulnerable-nextjsau
 | Consumer | Previous Next.js | Exact target |
 | --- | --- | --- |
 | Web and platform base example | 16.2.3 | 16.3.5 |
-| Docs and credential-sync example | 15.5.15 | 15.5.24 |
+| Docs | ^15.1.0 (locked 15.5.15) | 15.5.24 |
+| Credential-sync example | 15.5.15 | 15.5.24 |
 
 The docs manifest previously allowed `^15.1.0`; exact pins now identify both
 maintained major branches. Yarn 4.12.0 generated the lockfile. Coupled changes are
