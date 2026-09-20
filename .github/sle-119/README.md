@@ -24,6 +24,11 @@ checks supported changed files; this does not reformat unrelated upstream files.
 The existing unit-suite configuration remains unchanged, including standard per-file
 isolation. Disabling isolation contaminates shared mocks. No failing test is waived.
 
+Embed asset copying uses Node's built-in recursive copy rather than downloading
+undeclared `shx` through `npx` during the build. A regression fixture exercises the
+actual manifest command, nested assets, preserved declarations, repeated copying
+and failure on missing input. No package or lockfile change is required.
+
 ## Fail-closed boundary
 
 No inherited-finding inventory or security exception is approved. Raw high and
