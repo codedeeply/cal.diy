@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+/**
+ * Keep application risk visible without confusing this platform-only gate with
+ * full release approval; incomplete scanner evidence must never imply safety.
+ */
 function summarizePlatform(report) {
   if (!Array.isArray(report.Results) || !report.Results.some((result) => result.Class === "os-pkgs")) {
     throw new Error("Trivy report must contain an OS package scan");
@@ -25,6 +29,10 @@ function summarizePlatform(report) {
   return summary;
 }
 
+/**
+ * Enforce remediation and non-regression together so an unfixed critical cannot
+ * be accepted merely because the historical baseline was more vulnerable.
+ */
 function checkPlatform(candidate, baseline) {
   const current = summarizePlatform(candidate);
   const previous = summarizePlatform(baseline);
