@@ -37,6 +37,18 @@ Negative fixtures prove report rejection, including deliberately unsafe image,
 action, secret, vulnerability and CodeQL inputs. They do not substitute for real
 scanner runs or a later controlled demonstration of repository merge blocking.
 
+Workflow validation uses Sierra-approved `yaml` 2.9.1 as a CI-only development
+dependency. It checks decoded keys and values, requires SHA-pinned external
+actions and the literal `ubuntu-24.04` runner, and rejects privileged events,
+secret access, continue-on-error, aliases, merge keys, duplicate keys, unsupported
+YAML versions, parse warnings and malformed documents. Actionlint independently
+checks workflow syntax. Report-only scan evaluation does not load the YAML parser.
+
+The parser fix is reviewed in a dependent draft PR targeting the CI bootstrap
+branch. The workflow includes that exact PR base so the dependent revision gets
+real checks. Neither PR is merge eligible while required checks or reviews fail;
+the additional branch trigger is not a gate exception or a publication trigger.
+
 The build harness uses only synthetic credentials and an isolated disposable
 database. It publishes no ports, image, tag, deployment, signature or release.
 It refuses existing task resources and cleans up only resources it creates.

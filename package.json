@@ -116,7 +116,8 @@
     "typescript": "5.9.3",
     "vitest": "4.1.8",
     "vitest-fetch-mock": "0.4.5",
-    "vitest-mock-extended": "3.1.0"
+    "vitest-mock-extended": "3.1.0",
+    "yaml": "2.9.1"
   },
   "resolutions": {
     "webpack": "5.104.1",

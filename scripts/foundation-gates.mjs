@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
@@ -98,14 +99,46 @@ function checkPins(dockerfile, workflow) {
     }
     if (match[2]) stages.add(match[2]);
   }
-  for (const match of workflow.matchAll(/\buses\s*:\s*(\S+)/g)) {
-    if (!/@[a-f0-9]{40}$/.test(match[1])) throw new Error(`Unpinned action: ${match[1]}`);
+  // Report-only jobs must remain usable without installing the workspace dependency graph.
+  const { parseDocument } = createRequire(import.meta.url)("yaml");
+  const document = parseDocument(workflow, { strict: true, uniqueKeys: true, stringKeys: true });
+  if (document.errors.length || document.warnings.length || document.directives.yaml.version !== "1.2") {
+    throw new Error("Invalid or ambiguous workflow YAML");
   }
-  const usesSecrets = [...workflow.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].some((match) =>
-    /\bsecrets\b/i.test(match[1])
-  );
-  if (usesSecrets || /pull_request_target|self-hosted|continue-on-error\s*:|secrets\./.test(workflow)) {
-    throw new Error("Unsafe bootstrap workflow capability");
+  const root = document.toJS({ mapAsMap: true, maxAliasCount: 0 });
+  if (!(root instanceof Map) || !root.size) throw new Error("Missing workflow mapping");
+  const pending = [root];
+  while (pending.length) {
+    const value = pending.pop();
+    if (value instanceof Map) {
+      for (const [key, child] of value) {
+        if (
+          ["<<", "pull_request_target", "continue-on-error"].includes(key.toLowerCase()) ||
+          (key.toLowerCase() === "secrets" && value !== root.get("jobs"))
+        ) {
+          throw new Error(`Unsafe workflow key: ${key}`);
+        }
+        if (
+          key.toLowerCase() === "uses" &&
+          (typeof child !== "string" || !/^[a-zA-Z0-9-]+\/[\w.-]+(?:\/[\w.-]+)*@[a-f0-9]{40}$/.test(child))
+        ) {
+          throw new Error("Actions must use an external repository and full commit SHA");
+        }
+        if (key.toLowerCase() === "runs-on" && child !== "ubuntu-24.04") {
+          throw new Error("Bootstrap jobs require the fixed GitHub-hosted runner");
+        }
+        pending.push(key, child);
+      }
+    } else if (Array.isArray(value)) {
+      pending.push(...value);
+    } else if (typeof value === "string") {
+      const usesSecrets = [...value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].some((match) =>
+        /\bsecrets\b/i.test(match[1])
+      );
+      if (usesSecrets || /pull_request_target|self-hosted|secrets\./i.test(value)) {
+        throw new Error("Unsafe bootstrap workflow capability");
+      }
+    }
   }
 }
 

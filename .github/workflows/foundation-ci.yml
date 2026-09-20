@@ -1,7 +1,7 @@
 name: Foundation CI
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable]
   push:
     branches: [main]
   workflow_dispatch:
@@ -37,16 +37,16 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24.21.0
+      - name: Install the exact locked workspace graph
+        run: |
+          corepack enable
+          node .yarn/releases/yarn-4.12.0.cjs install --immutable
       - name: Validate workflow and negative gate fixtures
         run: |
           node scripts/foundation-gates.mjs pins .github/workflows/foundation-ci.yml
           node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs
           docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 .github/workflows/foundation-ci.yml
           docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 scripts/foundation-image.sh
-      - name: Install the exact locked workspace graph
-        run: |
-          corepack enable
-          node .yarn/releases/yarn-4.12.0.cjs install --immutable
       - name: Forced type check
         run: yarn type-check:ci --force
       - name: Lint changed supported source

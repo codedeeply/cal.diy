@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { checkPins, checkReport } from "./foundation-gates.mjs";
 
@@ -121,4 +122,64 @@ test("CodeQL extension rule references retain the same severity gate", () => {
   run.results[0].rule.index = 0;
   run.results[0].rule.toolComponent.index = 1;
   assert.throws(() => checkReport("codeql", report));
+});
+
+const pinnedBase = `FROM node:24@sha256:${"a".repeat(64)}`;
+const pinnedAction = `actions/checkout@${"b".repeat(40)}`;
+const workflowCases = [
+  ["quoted uses", 'steps: [{"uses": "actions/checkout@v5"}]'],
+  ["escaped uses", 'steps: [{"u\\u0073es": "actions/checkout@v5"}]'],
+  ["explicit key", "? uses\n: actions/checkout@v5"],
+  ["quoted continue-on-error", 'steps: [{"continue-on-error": false}]'],
+  ["escaped continue-on-error", 'jobs: {test: {"continue-on-\\u0065rror": true}}'],
+  ["quoted privileged event", '"on": {"pull_request_target": {}}'],
+  ["event in sequence", 'on: [push, "pull_request_target"]'],
+  ["escaped privileged event", 'on: "pull_request_\\u0074arget"'],
+  ["escaped runner", 'runs-on: "self-\\u0068osted"'],
+  ["dynamic runner", "runs-on: ${{ inputs.runner }}"],
+  ["runner group", "runs-on: {group: internal}"],
+  ["escaped secrets", 'env: {TOKEN: "${{ se\\u0063rets.TOKEN }}"}'],
+  ["inherited secrets", "secrets: inherit"],
+  ["secret mapping", "jobs: {test: {secrets: {TOKEN: value}}}"],
+  ["duplicate quoted key", `uses: ${pinnedAction}\n"uses": actions/checkout@v5`],
+  ["alias", "name: &n safe\nrun-name: *n"],
+  ["cyclic alias", "jobs: &cycle {test: *cycle}"],
+  ["merge key", `jobs: {test: {'<<': {uses: ${pinnedAction}}}}`],
+  ["unknown tag", `uses: !unknown ${pinnedAction}`],
+  ["unknown directive", "%UNKNOWN ignored\n---\nname: example"],
+  ["YAML 1.1 directive", "%YAML 1.1\n---\nname: example"],
+  ["multiple documents", `uses: ${pinnedAction}\n---\nuses: actions/checkout@v5`],
+  ["complex key", "? [uses]\n: actions/checkout@v5"],
+  ["malformed document", "jobs: ["],
+  ["empty document", "# no workflow"],
+  ["scalar document", "name only"],
+  ["sequence document", "- uses: actions/checkout@v5"],
+  ["local action", `uses: ./local@${"b".repeat(40)}`],
+  ["Docker action", `uses: docker://image@${"b".repeat(40)}`],
+  ["null action", "uses:"],
+  ["numeric action", "uses: 123"],
+  ["prototype-like mapping", '__proto__: {"uses": actions/checkout@v5}'],
+];
+for (const [name, workflow] of workflowCases) {
+  test(`structural workflow policy rejects ${name}`, () => {
+    assert.throws(() => checkPins(pinnedBase, workflow));
+  });
+}
+
+test("structural workflow policy accepts decoded pinned actions and hosted jobs", () => {
+  for (const workflow of [
+    `steps: [{"uses": "${pinnedAction}"}]`,
+    `steps: [{"u\\u0073es": "${pinnedAction}"}]`,
+    `uses: >-\n  ${pinnedAction}`,
+    `jobs: {test: {runs-on: ubuntu-24.04, steps: [{uses: ${pinnedAction}}]}}`,
+    `jobs: {secrets: {runs-on: ubuntu-24.04, steps: [{uses: ${pinnedAction}}]}}`,
+    `uses: owner/repo/path/to/action@${"c".repeat(40)}`,
+    `on: [push, pull_request]\nuses: ${pinnedAction}`,
+  ]) {
+    checkPins(pinnedBase, workflow);
+  }
+});
+
+test("checked-in workflow and Dockerfile satisfy the structural policy", () => {
+  checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(".github/workflows/foundation-ci.yml", "utf8"));
 });
