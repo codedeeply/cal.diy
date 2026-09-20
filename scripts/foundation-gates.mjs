@@ -52,9 +52,23 @@ function checkReport(kind, report) {
     return;
   }
   if (!["image", "config", "dependencies"].includes(kind)) throw new Error(`Unknown report kind: ${kind}`);
+  const artifactType = kind === "image" ? "container_image" : "filesystem";
+  if (report.SchemaVersion !== 2 || report.ArtifactType !== artifactType) {
+    throw new Error("Missing/invalid Trivy report identity");
+  }
   const results = requireArray(report.Results, "Trivy results");
-  const expected = { image: "os-pkgs", config: "config", dependencies: "lang-pkgs" }[kind];
-  if (!results.some((result) => result.Class === expected)) throw new Error(`Missing ${expected} scan`);
+  const expected = {
+    image: [["os-pkgs"], ["lang-pkgs", "node-pkg"]],
+    config: [["config", "dockerfile"]],
+    dependencies: [["lang-pkgs", "yarn"]],
+  }[kind];
+  for (const [scanClass, type] of expected) {
+    const scan = results.find((result) => result.Class === scanClass && (!type || result.Type === type));
+    if (!scan) throw new Error(`Missing ${type ?? scanClass} scan`);
+    if (kind !== "config" && !requireArray(scan.Packages, "scanned packages").length) {
+      throw new Error("Empty package inventory cannot prove scan coverage");
+    }
+  }
   for (const result of results) {
     const findings = kind === "config" ? result.Misconfigurations : result.Vulnerabilities;
     for (const finding of requireArray(findings ?? [], "Trivy findings")) {

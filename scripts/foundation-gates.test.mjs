@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkPins, checkReport } from "./foundation-gates.mjs";
 
-const image = (findings = []) => ({ Results: [{ Class: "os-pkgs", Vulnerabilities: findings }] });
+const image = (findings = []) => ({
+  SchemaVersion: 2,
+  ArtifactType: "container_image",
+  Results: [
+    { Class: "os-pkgs", Packages: [{ Name: "os-fixture" }], Vulnerabilities: findings },
+    { Class: "lang-pkgs", Type: "node-pkg", Packages: [{ Name: "node-fixture" }] },
+  ],
+});
 const sarif = (results = [], score = "9.8") => ({
   runs: [
     {
@@ -31,18 +38,41 @@ test("unapproved image findings cannot be hidden by fixability or a fabricated a
   }
   checkReport("image", image());
   assert.throws(() => checkReport("dependencies", image()));
-  assert.throws(() =>
-    checkReport("dependencies", {
-      Results: [{ Class: "lang-pkgs", Vulnerabilities: [{ Severity: "CRITICAL" }] }],
-    })
-  );
+  const dependencies = { ...image(), ArtifactType: "filesystem" };
+  dependencies.Results = [{ ...image().Results[1], Type: "yarn" }];
+  checkReport("dependencies", dependencies);
+  dependencies.Results[0].Vulnerabilities = [{ Severity: "CRITICAL" }];
+  assert.throws(() => checkReport("dependencies", dependencies));
+  const nodeReport = image();
+  nodeReport.Results[1].Vulnerabilities = [{ Severity: "CRITICAL" }];
+  assert.throws(() => checkReport("image", nodeReport));
 });
 
 test("configuration failures and secret findings block eligibility", () => {
-  const report = { Results: [{ Class: "config", Misconfigurations: [{ Severity: "HIGH", ID: "unsafe" }] }] };
+  const report = {
+    SchemaVersion: 2,
+    ArtifactType: "filesystem",
+    Results: [
+      { Class: "config", Type: "dockerfile", Misconfigurations: [{ Severity: "HIGH", ID: "unsafe" }] },
+    ],
+  };
   assert.throws(() => checkReport("config", report));
   assert.throws(() => checkReport("gitleaks", [{ RuleID: "fixture" }]));
   checkReport("gitleaks", []);
+});
+
+test("image coverage requires OS and Node packages from the expected scanner schema", () => {
+  const valid = image();
+  for (const report of [
+    { ...valid, Results: valid.Results.slice(0, 1) },
+    { ...valid, Results: valid.Results.slice(1) },
+    { ...valid, Results: [valid.Results[0], { ...valid.Results[1], Packages: [] }] },
+    { ...valid, Results: [{ ...valid.Results[0], Packages: undefined }, valid.Results[1]] },
+    { ...valid, ArtifactType: "filesystem" },
+    { ...valid, SchemaVersion: undefined },
+  ]) {
+    assert.throws(() => checkReport("image", report));
+  }
 });
 
 test("CodeQL high findings, missing metadata and failed analysis block eligibility", () => {
