@@ -1,0 +1,90 @@
+import { readFileSync } from "node:fs";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
+
+/** Missing or malformed evidence must not turn a security check green. */
+function requireArray(value, label) {
+  if (!Array.isArray(value)) throw new Error(`Missing/invalid ${label}`);
+  return value;
+}
+
+/** No inherited-finding allowance is approved; raw high/critical findings remain blocking. */
+function checkReport(kind, report) {
+  if (kind === "gitleaks") {
+    if (requireArray(report, "Gitleaks findings").length) throw new Error("Gitleaks findings require review");
+    return;
+  }
+  if (kind === "codeql") {
+    const runs = requireArray(report.runs, "SARIF runs");
+    if (!runs.length) throw new Error("Missing CodeQL analysis");
+    for (const run of runs) {
+      if (run.tool?.driver?.name !== "CodeQL") throw new Error("Unexpected SARIF producer");
+      const rules = requireArray(run.tool.driver.rules, "CodeQL rules");
+      for (const invocation of run.invocations ?? []) {
+        if (invocation.executionSuccessful === false) throw new Error("CodeQL execution failed");
+      }
+      for (const finding of requireArray(run.results, "CodeQL results")) {
+        const rule = rules.find((item) => item.id === finding.ruleId);
+        if (!rule) throw new Error("Missing CodeQL rule metadata");
+        const rawScore = rule.properties?.["security-severity"];
+        if (typeof rawScore !== "string" || !rawScore.trim()) throw new Error("Missing CodeQL severity");
+        const score = Number(rawScore);
+        if (!Number.isFinite(score) || score < 0 || score >= 7 || finding.level === "error") {
+          throw new Error(`Unapproved CodeQL finding: ${finding.ruleId}`);
+        }
+      }
+    }
+    return;
+  }
+  if (!["image", "config", "dependencies"].includes(kind)) throw new Error(`Unknown report kind: ${kind}`);
+  const results = requireArray(report.Results, "Trivy results");
+  const expected = { image: "os-pkgs", config: "config", dependencies: "lang-pkgs" }[kind];
+  if (!results.some((result) => result.Class === expected)) throw new Error(`Missing ${expected} scan`);
+  for (const result of results) {
+    const findings = kind === "config" ? result.Misconfigurations : result.Vulnerabilities;
+    for (const finding of requireArray(findings ?? [], "Trivy findings")) {
+      if (!["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(finding.Severity)) {
+        throw new Error("Missing/invalid finding severity");
+      }
+      if (["UNKNOWN", "HIGH", "CRITICAL"].includes(finding.Severity)) {
+        throw new Error(`Unapproved ${kind} finding: ${finding.VulnerabilityID ?? finding.ID}`);
+      }
+    }
+  }
+}
+
+/** Pin executable inputs so a passing review cannot silently select different upstream code. */
+function checkPins(dockerfile, workflow) {
+  const stages = new Set();
+  const bases = dockerfile
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^FROM\s/i.test(line));
+  if (!bases.length) throw new Error("Missing base-image declaration");
+  for (const line of bases) {
+    const match = line.match(/^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?$/i);
+    if (!match) throw new Error("Unrecognized Docker base-image declaration");
+    if (!stages.has(match[1]) && !/@sha256:[a-f0-9]{64}$/.test(match[1])) {
+      throw new Error(`Unpinned base image: ${match[1]}`);
+    }
+    if (match[2]) stages.add(match[2]);
+  }
+  for (const match of workflow.matchAll(/\buses\s*:\s*(\S+)/g)) {
+    if (!/@[a-f0-9]{40}$/.test(match[1])) throw new Error(`Unpinned action: ${match[1]}`);
+  }
+  if (/pull_request_target|self-hosted|continue-on-error\s*:|secrets\./.test(workflow)) {
+    throw new Error("Unsafe bootstrap workflow capability");
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [kind, file] = process.argv.slice(2);
+  if (kind === "pins") {
+    checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(file, "utf8"));
+  } else {
+    checkReport(kind, JSON.parse(readFileSync(file, "utf8")));
+  }
+  console.log(`${kind}: PASS`);
+}
+
+export { checkPins, checkReport };
