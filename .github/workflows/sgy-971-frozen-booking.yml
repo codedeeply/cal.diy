@@ -1,0 +1,379 @@
+name: SGY-971 Frozen Booking Proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: 6bc45298226f96ff79e0c070c8b2ce39727e8477
+  SOURCE_SHORT_SHA: 6bc45298226f
+  LOCAL_IMAGE: caldiy-sgy971:6bc45298226f
+  PUBLISHED_IMAGE: ghcr.io/codedeeply/cal.diy:spike-6bc45298226f
+  POSTGRES_IMAGE: postgres:16@sha256:a85daf0dbd5e79586e850e3fe4b21b796799828ad015ce2166aeb98cc24da61c
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb
+  TRIVY_IMAGE: aquasec/trivy@sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9
+  SYFT_IMAGE: anchore/syft@sha256:9ea468e53b16b387d92b253f80a14d07a2d2973e0a5017c57b604b56e6f7cc43
+
+jobs:
+  build-scan-book:
+    name: Build, scan, and book locally
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out frozen fork commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Verify source ancestry and harness-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$SOURCE_SHA" "$GITHUB_SHA"
+          mkdir -p artifacts
+          git diff --name-only "$SOURCE_SHA" "$GITHUB_SHA" | sort > artifacts/changed-files.txt
+          unexpected="$(git diff --name-only "$SOURCE_SHA" "$GITHUB_SHA" -- apps packages Dockerfile package.json yarn.lock || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo "Application-runtime or dependency changes are not allowed in the baseline:"
+            echo "$unexpected"
+            exit 1
+          fi
+          git show -s --format='source_sha=%H%ndate=%cI%nsubject=%s' "$SOURCE_SHA" > artifacts/source.txt
+          printf 'fork_commit=%s\nworkflow_url=%s/%s/actions/runs/%s\n' \
+            "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> artifacts/source.txt
+
+      - name: Inventory current tree with Gitleaks
+        shell: bash
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            -w /repo \
+            "$GITLEAKS_IMAGE" \
+            dir /repo --redact --exit-code 0 --report-format json --report-path /repo/artifacts/gitleaks.json
+          jq '{currentTreeFindings:length}' artifacts/gitleaks.json > artifacts/gitleaks-counts.json
+
+      - name: Gate new spike files with Gitleaks
+        id: gitleaks
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          scan_root="$(mktemp -d)"
+          mkdir -p "$scan_root/.github/workflows" "$scan_root/scripts"
+          cp -R .github/sgy-971 "$scan_root/.github/sgy-971"
+          cp .github/workflows/sgy-971-frozen-booking.yml "$scan_root/.github/workflows/"
+          cp scripts/sgy-971-seed.ts "$scan_root/scripts/"
+          docker run --rm \
+            -v "$scan_root:/scan:ro" \
+            -v "$PWD/artifacts:/out" \
+            "$GITLEAKS_IMAGE" \
+            dir /scan --redact --report-format json --report-path /out/gitleaks-spike.json
+
+      - name: Start disposable PostgreSQL 16
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create sgy971
+          docker run --detach --name sgy971-postgres --network sgy971 \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=calendso \
+            "$POSTGRES_IMAGE"
+          for attempt in {1..60}; do
+            echo "Waiting for PostgreSQL ($attempt/60)"
+            if docker exec sgy971-postgres pg_isready -U postgres -d calendso; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sgy971-postgres
+          exit 1
+
+      - name: Generate test-only application values
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'NEXTAUTH_SECRET=%s\n' "$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
+          printf 'CALENDSO_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        with:
+          driver-opts: network=container:sgy971-postgres
+
+      - name: Build runner-local AMD64 image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          platforms: linux/amd64
+          tags: ${{ env.LOCAL_IMAGE }}
+          provenance: false
+          build-args: |
+            NEXT_PUBLIC_WEBAPP_URL=http://127.0.0.1:3000
+            NEXT_PUBLIC_API_V2_URL=
+            NEXT_PUBLIC_LICENSE_CONSENT=agree
+            CALCOM_TELEMETRY_DISABLED=1
+            DATABASE_URL=postgresql://postgres:postgres@localhost:5432/calendso
+            NEXTAUTH_SECRET=${{ env.NEXTAUTH_SECRET }}
+            CALENDSO_ENCRYPTION_KEY=${{ env.CALENDSO_ENCRYPTION_KEY }}
+
+      - name: Record local image size
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_size="$(docker image inspect "$LOCAL_IMAGE" --format '{{.Size}}')"
+          printf '{"image":"%s","sizeBytes":%s}\n' "$LOCAL_IMAGE" "$image_size" > artifacts/local-image.json
+
+      - name: Type check frozen source and spike harness
+        shell: bash
+        run: |
+          docker run --rm --network sgy971 \
+            -e DATABASE_URL=postgresql://postgres:postgres@sgy971-postgres:5432/calendso \
+            -e DATABASE_DIRECT_URL=postgresql://postgres:postgres@sgy971-postgres:5432/calendso \
+            "$LOCAL_IMAGE" yarn type-check:ci --force
+
+      - name: Create CycloneDX SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD/artifacts:/out" \
+            "$SYFT_IMAGE" \
+            "docker:$LOCAL_IMAGE" -o cyclonedx-json=/out/sbom.cdx.json
+
+      - name: Scan image with Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD/artifacts:/out" \
+            "$TRIVY_IMAGE" image \
+            --disable-telemetry --no-progress --scanners vuln \
+            --severity HIGH,CRITICAL --format json --output /out/trivy.json \
+            "$LOCAL_IMAGE"
+          jq '{
+            HIGH: ([.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length),
+            HIGH_FIXABLE: ([.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH" and (.FixedVersion // "") != "")] | length),
+            CRITICAL: ([.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length),
+            CRITICAL_FIXABLE: ([.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" and (.FixedVersion // "") != "")] | length)
+          }' artifacts/trivy.json > artifacts/trivy-counts.json
+
+      - name: Enforce fixable CRITICAL vulnerability gate
+        id: trivy_gate
+        continue-on-error: true
+        shell: bash
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            "$TRIVY_IMAGE" image \
+            --disable-telemetry --no-progress --scanners vuln \
+            --ignore-unfixed --severity CRITICAL --exit-code 1 \
+            "$LOCAL_IMAGE"
+
+      - name: Boot the built image and run migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --name sgy971-app --network sgy971 -p 3000:3000 \
+            -e DATABASE_HOST=sgy971-postgres:5432 \
+            -e DATABASE_URL=postgresql://postgres:postgres@sgy971-postgres:5432/calendso \
+            -e DATABASE_DIRECT_URL=postgresql://postgres:postgres@sgy971-postgres:5432/calendso \
+            -e NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \
+            -e CALENDSO_ENCRYPTION_KEY="$CALENDSO_ENCRYPTION_KEY" \
+            -e NEXTAUTH_URL=http://127.0.0.1:3000 \
+            -e NEXT_PUBLIC_WEBAPP_URL=http://127.0.0.1:3000 \
+            -e NEXT_PUBLIC_DISABLE_SIGNUP=true \
+            -e CALCOM_TELEMETRY_DISABLED=1 \
+            "$LOCAL_IMAGE"
+          for attempt in {1..120}; do
+            echo "Waiting for the web image ($attempt/120)"
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3000/auth/login || true)"
+            if [[ "$status" == "200" || "$status" == "307" ]]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sgy971-app
+          exit 1
+
+      - name: Seed one synthetic user and event
+        shell: bash
+        run: docker exec sgy971-app yarn ts-node --transpile-only /calcom/scripts/sgy-971-seed.ts
+
+      - name: Build isolated browser-test harness
+        shell: bash
+        run: docker build --file .github/sgy-971/Dockerfile.playwright --tag sgy971-playwright .github/sgy-971
+
+      - name: Complete one visible booking
+        shell: bash
+        run: |
+          docker run --rm --network sgy971 \
+            -e BASE_URL=http://sgy971-app:3000 \
+            -e EVIDENCE_DIR=/artifacts \
+            -v "$PWD/artifacts:/artifacts" \
+            sgy971-playwright
+
+      - name: Assert exactly one matching database row
+        shell: bash
+        run: |
+          set -euo pipefail
+          booking_count="$(docker exec sgy971-postgres psql -U postgres -d calendso -tAc \
+            'SELECT COUNT(DISTINCT b.id) FROM "Booking" b JOIN "Attendee" a ON a."bookingId" = b.id JOIN "EventType" e ON e.id = b."eventTypeId" JOIN users u ON u.id = e."userId" WHERE a.email = '\''sgy-971-attendee@example.invalid'\'' AND u.username = '\''sgy-971-host'\'' AND e.slug = '\''30-min'\'';')"
+          if [[ "$booking_count" != "1" ]]; then
+            echo "Expected exactly one matching booking row; found $booking_count"
+            exit 1
+          fi
+          printf '{"matchingBookingRows":%s,"assertion":"PASS"}\n' "$booking_count" > artifacts/database-assertion.json
+
+      - name: Write run summary
+        if: always()
+        shell: bash
+        env:
+          GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+          TRIVY_GATE_OUTCOME: ${{ steps.trivy_gate.outcome }}
+        run: |
+          printf "## SGY-971 run %s\n\n- Source: %s\n- Fork commit: %s\n- Gitleaks: %s\n- Fixable CRITICAL gate: %s\n" \
+            "$GITHUB_RUN_ID" "$SOURCE_SHA" "$GITHUB_SHA" \
+            "$GITLEAKS_OUTCOME" "$TRIVY_GATE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test and scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sgy-971-test-evidence-${{ github.run_id }}
+          path: artifacts
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Enforce scan results
+        if: always()
+        shell: bash
+        env:
+          GITLEAKS_OUTCOME: ${{ steps.gitleaks.outcome }}
+          TRIVY_GATE_OUTCOME: ${{ steps.trivy_gate.outcome }}
+        run: |
+          [[ "$GITLEAKS_OUTCOME" == "success" ]]
+          [[ "$TRIVY_GATE_OUTCOME" == "success" ]]
+
+      - name: Clean disposable services
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force sgy971-app sgy971-postgres 2>/dev/null || true
+          docker network rm sgy971 2>/dev/null || true
+
+  publish:
+    name: Publish immutable GHCR tag
+    needs: build-scan-book
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Start disposable build database
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network create sgy971-publish
+          docker run --detach --name sgy971-publish-postgres --network sgy971-publish \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=calendso \
+            "$POSTGRES_IMAGE"
+          for attempt in {1..60}; do
+            echo "Waiting for publish PostgreSQL ($attempt/60)"
+            if docker exec sgy971-publish-postgres pg_isready -U postgres -d calendso; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Generate test-only build values
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'NEXTAUTH_SECRET=%s\n' "$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_ENV"
+          printf 'CALENDSO_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        with:
+          driver-opts: network=container:sgy971-publish-postgres
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish AMD64 image
+        id: publish
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.PUBLISHED_IMAGE }}
+          provenance: false
+          build-args: |
+            NEXT_PUBLIC_WEBAPP_URL=http://127.0.0.1:3000
+            NEXT_PUBLIC_API_V2_URL=
+            NEXT_PUBLIC_LICENSE_CONSENT=agree
+            CALCOM_TELEMETRY_DISABLED=1
+            DATABASE_URL=postgresql://postgres:postgres@localhost:5432/calendso
+            NEXTAUTH_SECRET=${{ env.NEXTAUTH_SECRET }}
+            CALENDSO_ENCRYPTION_KEY=${{ env.CALENDSO_ENCRYPTION_KEY }}
+
+      - name: Record published digest and compressed size
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p publish-evidence
+          index="$(docker buildx imagetools inspect --raw "$PUBLISHED_IMAGE@$IMAGE_DIGEST")"
+          if jq -e '.manifests' <<< "$index" >/dev/null; then
+            manifest_digest="$(jq -r '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest' <<< "$index" | head -1)"
+            manifest="$(docker buildx imagetools inspect --raw "$PUBLISHED_IMAGE@$manifest_digest")"
+          else
+            manifest_digest="$IMAGE_DIGEST"
+            manifest="$index"
+          fi
+          compressed_size="$(jq '[.config.size, (.layers[]?.size)] | add' <<< "$manifest")"
+          jq -n \
+            --arg image "$PUBLISHED_IMAGE" \
+            --arg digest "$IMAGE_DIGEST" \
+            --arg manifestDigest "$manifest_digest" \
+            --argjson compressedSizeBytes "$compressed_size" \
+            "{image:\$image,digest:\$digest,manifestDigest:\$manifestDigest,compressedSizeBytes:\$compressedSizeBytes}" \
+            > publish-evidence/published-image.json
+          printf "## Published image\n\n- %s@%s\n- Compressed size: %s bytes\n" \
+            "$PUBLISHED_IMAGE" "$IMAGE_DIGEST" "$compressed_size" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload publish evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sgy-971-publish-evidence-${{ github.run_id }}
+          path: publish-evidence
+          retention-days: 90
+
+      - name: Clean publish database
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force sgy971-publish-postgres 2>/dev/null || true
+          docker network rm sgy971-publish 2>/dev/null || true
