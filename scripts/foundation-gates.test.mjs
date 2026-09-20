@@ -70,8 +70,25 @@ test("mutable actions/images and privileged workflow shortcuts are rejected", ()
     "continue-on-error: true",
     "continue-on-error : true",
     "secrets.TOKEN",
+    `\${{ secrets['TOKEN'] }}`,
+    `\${{ toJSON(secrets) }}`,
   ]) {
     assert.throws(() => checkPins(pinnedBase, unsafe));
   }
   checkPins(pinnedBase, `uses: actions/checkout@${"b".repeat(40)}`);
+});
+
+test("CodeQL extension rule references retain the same severity gate", () => {
+  const report = sarif([{ ruleId: "risk", rule: { id: "risk", index: 0, toolComponent: { index: 0 } } }]);
+  const run = report.runs[0];
+  run.tool.extensions = [{ name: "codeql/javascript-queries", rules: run.tool.driver.rules }];
+  run.tool.driver.rules = [];
+  assert.throws(() => checkReport("codeql", report));
+  run.tool.extensions[0].rules[0].properties["security-severity"] = "4.0";
+  checkReport("codeql", report);
+  run.results[0].rule.index = 1;
+  assert.throws(() => checkReport("codeql", report));
+  run.results[0].rule.index = 0;
+  run.results[0].rule.toolComponent.index = 1;
+  assert.throws(() => checkReport("codeql", report));
 });

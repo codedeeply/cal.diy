@@ -21,7 +21,8 @@ both PR head and checked merge SHA; rerun after either head or base changes.
 
 The Node test files under `scripts/` run through `node --test`, not Vitest. Biome
 checks supported changed files; this does not reformat unrelated upstream files.
-The existing unit-suite configuration remains unchanged. No failing test is waived.
+The existing unit-suite configuration remains unchanged, including standard per-file
+isolation. Disabling isolation contaminates shared mocks. No failing test is waived.
 
 ## Fail-closed boundary
 

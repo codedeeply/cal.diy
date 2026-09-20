@@ -19,13 +19,28 @@ function checkReport(kind, report) {
     if (!runs.length) throw new Error("Missing CodeQL analysis");
     for (const run of runs) {
       if (run.tool?.driver?.name !== "CodeQL") throw new Error("Unexpected SARIF producer");
-      const rules = requireArray(run.tool.driver.rules, "CodeQL rules");
+      requireArray(run.tool.driver.rules, "CodeQL driver rules");
       for (const invocation of run.invocations ?? []) {
         if (invocation.executionSuccessful === false) throw new Error("CodeQL execution failed");
       }
       for (const finding of requireArray(run.results, "CodeQL results")) {
-        const rule = rules.find((item) => item.id === finding.ruleId);
+        let component = run.tool.driver;
+        const extensionIndex = finding.rule?.toolComponent?.index;
+        if (extensionIndex !== undefined) {
+          if (!Number.isInteger(extensionIndex) || extensionIndex < 0)
+            throw new Error("Invalid rule component");
+          component = requireArray(run.tool.extensions, "CodeQL extensions")[extensionIndex];
+        }
+        const rules = requireArray(component?.rules, "CodeQL component rules");
+        const ruleId = finding.ruleId ?? finding.rule?.id;
+        const rule = rules.find((item) => item.id === ruleId);
         if (!rule) throw new Error("Missing CodeQL rule metadata");
+        const ruleIndex = finding.ruleIndex ?? finding.rule?.index;
+        if (ruleIndex !== undefined && (!Number.isInteger(ruleIndex) || rules[ruleIndex] !== rule)) {
+          throw new Error("Inconsistent CodeQL rule reference");
+        }
+        if (finding.rule?.id !== undefined && finding.rule.id !== ruleId)
+          throw new Error("Conflicting rule ID");
         const rawScore = rule.properties?.["security-severity"];
         if (typeof rawScore !== "string" || !rawScore.trim()) throw new Error("Missing CodeQL severity");
         const score = Number(rawScore);
@@ -72,7 +87,10 @@ function checkPins(dockerfile, workflow) {
   for (const match of workflow.matchAll(/\buses\s*:\s*(\S+)/g)) {
     if (!/@[a-f0-9]{40}$/.test(match[1])) throw new Error(`Unpinned action: ${match[1]}`);
   }
-  if (/pull_request_target|self-hosted|continue-on-error\s*:|secrets\./.test(workflow)) {
+  const usesSecrets = [...workflow.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].some((match) =>
+    /\bsecrets\b/i.test(match[1])
+  );
+  if (usesSecrets || /pull_request_target|self-hosted|continue-on-error\s*:|secrets\./.test(workflow)) {
     throw new Error("Unsafe bootstrap workflow capability");
   }
 }
