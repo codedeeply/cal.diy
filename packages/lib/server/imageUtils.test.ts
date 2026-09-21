@@ -6,6 +6,11 @@ import { convertSvgToPng, detectContentType, resizeImage } from "./imageUtils";
 
 const source = { create: { width: 8, height: 4, channels: 3 as const, background: "#123456" } };
 const formats = ["png", "jpeg", "webp", "avif"] as const;
+// This small libheif corpus fixture avoids requiring HEVC encoding support from prebuilt Sharp.
+const hevcMetadataFixture: Buffer = Buffer.from(
+  "AAAAHGZ0eXBoZWljAAAAAG1pZjFoZWljbWlhZgAAAXttZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAACJpbG9jAAAAAERAAAEAAQAAAAABnwABAAAAAAAAAGwAAAAjaWluZgAAAAAAAQAAABVpbmZlAgAAAAABAABodmMxAAAAAA5waXRtAAAAAAABAAAA+2lwcnAAAADbaXBjbwAAAHZodmNDAQNwAAAAAAAAAAAAHvAA/P34+AAADwNgAAEAGEABDAH//wNwAAADAJAAAAMAAAMAHroCQGEAAQAqQgEBA3AAAAMAkAAAAwAAAwAeoCCBBZbq5Ka5uAhoMCAAAAMDIAAAAwAhYgABAAZEAcFzwIkAAAATY29scm5jbHgAAQANAAaAAAAAFGlzcGUAAAAAAAAAQAAAAEAAAAAoY2xhcAAAACAAAAABAAAAIAAAAAH////gAAAAAv///+AAAAACAAAADnBpeGkAAAAAAQgAAAAYaXBtYQAAAAAAAAABAAEFgQIDBYQAAAB0bWRhdAAAAGgoAa8TgPUrAhGDczL1mz4HCRRzxqbGjnnUrr1cLTO799zRz6nw0QjRMp+4I2Da10D3ghQEMvB53CWoI0S3qXIb99YsvLFaQ9ZLHxsJsZ9SxlvNJ5EgD4Y4miuaKu3bxPGXDHirp/9TzA==",
+  "base64"
+);
 
 describe("approved native Sharp dependency", () => {
   it.each(["apps/web", "packages/lib"])("%s directly resolves exact Sharp 0.35.4", (workspace) => {
@@ -43,17 +48,12 @@ describe("native image helpers", () => {
   });
 
   it("does not classify unrelated HEIF compression as AVIF", async () => {
-    const buffer = await sharp(source).avif().toBuffer();
-    const unrelatedHeifBuffer = Buffer.from(buffer);
-    unrelatedHeifBuffer.write("mif1", 8, "ascii");
-
-    expect(await sharp(unrelatedHeifBuffer).metadata()).toMatchObject({
+    expect(await sharp(hevcMetadataFixture).metadata()).toMatchObject({
       format: "heif",
       compression: "hevc",
       mediaType: "image/heic",
     });
-    expect((await sharp(unrelatedHeifBuffer).raw().toBuffer()).length).toBeGreaterThan(0);
-    expect(await detectContentType(unrelatedHeifBuffer)).toBeNull();
+    expect(await detectContentType(hevcMetadataFixture)).toBeNull();
   });
 
   it("does not enlarge small images unless a height is explicitly requested", async () => {
