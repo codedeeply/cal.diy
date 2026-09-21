@@ -116,7 +116,8 @@
     "typescript": "5.9.3",
     "vitest": "4.1.8",
     "vitest-fetch-mock": "0.4.5",
-    "vitest-mock-extended": "3.1.0"
+    "vitest-mock-extended": "3.1.0",
+    "yaml": "2.9.1"
   },
   "resolutions": {
     "webpack": "5.104.1",
@@ -173,7 +174,8 @@
     "@adobe/css-tools": "4.3.2",
     "jsondiffpatch": "0.7.2",
     "min-document": "2.19.1",
-    "tar": "7.5.11",
+    "tar": "7.5.21",
+    "faye-websocket/websocket-driver": "0.7.5",
     "lodash": "4.18.1",
     "lodash-es": "4.18.1",
     "@lingo.dev/_compiler/fast-xml-parser": "5.5.9",

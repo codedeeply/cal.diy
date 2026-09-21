@@ -1,0 +1,230 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
+import { evaluateGitleaks } from "./foundation-secret-dispositions.mjs";
+
+/** Missing or malformed evidence must not turn a security check green. */
+function requireArray(value, label) {
+  if (!Array.isArray(value)) throw new Error(`Missing/invalid ${label}`);
+  return value;
+}
+
+/** General report evaluation never infers an approval from a finding's own fields. */
+function checkReport(kind, report) {
+  if (kind === "gitleaks") {
+    if (requireArray(report, "Gitleaks findings").length) throw new Error("Gitleaks findings require review");
+    return;
+  }
+  if (kind === "codeql") {
+    const runs = requireArray(report.runs, "SARIF runs");
+    if (!runs.length) throw new Error("Missing CodeQL analysis");
+    for (const run of runs) {
+      if (run.tool?.driver?.name !== "CodeQL") throw new Error("Unexpected SARIF producer");
+      requireArray(run.tool.driver.rules, "CodeQL driver rules");
+      for (const invocation of run.invocations ?? []) {
+        if (invocation.executionSuccessful === false) throw new Error("CodeQL execution failed");
+      }
+      for (const finding of requireArray(run.results, "CodeQL results")) {
+        let component = run.tool.driver;
+        const extensionIndex = finding.rule?.toolComponent?.index;
+        if (extensionIndex !== undefined) {
+          if (!Number.isInteger(extensionIndex) || extensionIndex < 0)
+            throw new Error("Invalid rule component");
+          component = requireArray(run.tool.extensions, "CodeQL extensions")[extensionIndex];
+        }
+        const rules = requireArray(component?.rules, "CodeQL component rules");
+        const ruleId = finding.ruleId ?? finding.rule?.id;
+        const rule = rules.find((item) => item.id === ruleId);
+        if (!rule) throw new Error("Missing CodeQL rule metadata");
+        const ruleIndex = finding.ruleIndex ?? finding.rule?.index;
+        if (ruleIndex !== undefined && (!Number.isInteger(ruleIndex) || rules[ruleIndex] !== rule)) {
+          throw new Error("Inconsistent CodeQL rule reference");
+        }
+        if (finding.rule?.id !== undefined && finding.rule.id !== ruleId)
+          throw new Error("Conflicting rule ID");
+        const rawScore = rule.properties?.["security-severity"];
+        if (typeof rawScore !== "string" || !rawScore.trim()) throw new Error("Missing CodeQL severity");
+        const score = Number(rawScore);
+        if (!Number.isFinite(score) || score < 0 || score >= 7 || finding.level === "error") {
+          throw new Error(`Unapproved CodeQL finding: ${finding.ruleId}`);
+        }
+      }
+    }
+    return;
+  }
+  if (!["image", "config", "dependencies"].includes(kind)) throw new Error(`Unknown report kind: ${kind}`);
+  const artifactType = kind === "image" ? "container_image" : "filesystem";
+  if (report.SchemaVersion !== 2 || report.ArtifactType !== artifactType) {
+    throw new Error("Missing/invalid Trivy report identity");
+  }
+  const results = requireArray(report.Results, "Trivy results");
+  const expected = {
+    image: [["os-pkgs"], ["lang-pkgs", "node-pkg"]],
+    config: [["config", "dockerfile"]],
+    dependencies: [["lang-pkgs", "yarn"]],
+  }[kind];
+  for (const [scanClass, type] of expected) {
+    const scan = results.find((result) => result.Class === scanClass && (!type || result.Type === type));
+    if (!scan) throw new Error(`Missing ${type ?? scanClass} scan`);
+    if (kind !== "config" && !requireArray(scan.Packages, "scanned packages").length) {
+      throw new Error("Empty package inventory cannot prove scan coverage");
+    }
+  }
+  for (const result of results) {
+    const findings = kind === "config" ? result.Misconfigurations : result.Vulnerabilities;
+    for (const finding of requireArray(findings ?? [], "Trivy findings")) {
+      if (!["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(finding.Severity)) {
+        throw new Error("Missing/invalid finding severity");
+      }
+      if (["UNKNOWN", "HIGH", "CRITICAL"].includes(finding.Severity)) {
+        throw new Error(`Unapproved ${kind} finding: ${finding.VulnerabilityID ?? finding.ID}`);
+      }
+    }
+  }
+}
+
+/** Explicit scopes prevent inherited token grants and conditional gate skipping. */
+function checkWorkflowScopes(root) {
+  const jobs = root.get("jobs");
+  const requiredJobs = ["quality", "secrets", "codeql", "artifact", "eligibility"];
+  if (
+    !(jobs instanceof Map) ||
+    jobs.size !== requiredJobs.length ||
+    requiredJobs.some((id) => !jobs.has(id))
+  ) {
+    throw new Error("Expected exactly the five Foundation jobs");
+  }
+  const permissionScopes = new Set([root]);
+  const conditionScopes = new Set();
+  const checkPermissions = (value, expected) => {
+    if (
+      !(value instanceof Map) ||
+      value.size !== expected.length ||
+      expected.some(([key, grant]) => value.get(key) !== grant)
+    ) {
+      throw new Error("Unapproved workflow permissions");
+    }
+  };
+  checkPermissions(root.get("permissions"), [["contents", "read"]]);
+  for (const [id, job] of jobs) {
+    if (!(job instanceof Map)) throw new Error("Invalid Foundation job");
+    permissionScopes.add(job);
+    if (id === "codeql") {
+      checkPermissions(job.get("permissions"), [
+        ["contents", "read"],
+        ["security-events", "write"],
+      ]);
+    } else if (job.has("permissions")) {
+      checkPermissions(job.get("permissions"), [["contents", "read"]]);
+    }
+    if (id === "eligibility") {
+      if (job.get("if") !== "always()") throw new Error("Eligibility must always evaluate dependencies");
+      conditionScopes.add(job);
+    }
+    const steps = requireArray(job.get("steps"), "Foundation steps");
+    if (!steps.length) throw new Error("Empty Foundation job");
+    for (const step of steps) {
+      if (!(step instanceof Map)) throw new Error("Invalid Foundation step");
+      // Diagnostic uploads must still run after a scan fails; executable gates may not be conditional.
+      if (
+        step.get("uses") === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" &&
+        !step.has("run")
+      ) {
+        if (step.get("if") !== "always()") throw new Error("Evidence upload must always run");
+        conditionScopes.add(step);
+      }
+    }
+  }
+  const pending = [root];
+  while (pending.length) {
+    const value = pending.pop();
+    if (value instanceof Map) {
+      if (value.has("permissions") && !permissionScopes.has(value))
+        throw new Error("Invalid permissions scope");
+      if (value.has("if") && !conditionScopes.has(value))
+        throw new Error("Conditional Foundation execution is forbidden");
+      pending.push(...value.values());
+    } else if (Array.isArray(value)) pending.push(...value);
+  }
+}
+
+/** Pin executable inputs so a passing review cannot silently select different upstream code. */
+function checkPins(dockerfile, workflow) {
+  const stages = new Set();
+  const bases = dockerfile
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^FROM\s/i.test(line));
+  if (!bases.length) throw new Error("Missing base-image declaration");
+  for (const line of bases) {
+    const match = line.match(/^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?$/i);
+    if (!match) throw new Error("Unrecognized Docker base-image declaration");
+    if (!stages.has(match[1]) && !/@sha256:[a-f0-9]{64}$/.test(match[1])) {
+      throw new Error(`Unpinned base image: ${match[1]}`);
+    }
+    if (match[2]) stages.add(match[2]);
+  }
+  // Report-only jobs must remain usable without installing the workspace dependency graph.
+  const { parseDocument } = createRequire(import.meta.url)("yaml");
+  const document = parseDocument(workflow, { strict: true, uniqueKeys: true, stringKeys: true });
+  if (document.errors.length || document.warnings.length || document.directives.yaml.version !== "1.2") {
+    throw new Error("Invalid or ambiguous workflow YAML");
+  }
+  const root = document.toJS({ mapAsMap: true, maxAliasCount: 0 });
+  if (!(root instanceof Map) || !root.size) throw new Error("Missing workflow mapping");
+  const pending = [root];
+  while (pending.length) {
+    const value = pending.pop();
+    if (value instanceof Map) {
+      for (const [key, child] of value) {
+        if (
+          ["<<", "pull_request_target", "continue-on-error"].includes(key.toLowerCase()) ||
+          (key.toLowerCase() === "secrets" && value !== root.get("jobs"))
+        ) {
+          throw new Error(`Unsafe workflow key: ${key}`);
+        }
+        if (
+          key.toLowerCase() === "uses" &&
+          (typeof child !== "string" || !/^[a-zA-Z0-9-]+\/[\w.-]+(?:\/[\w.-]+)*@[a-f0-9]{40}$/.test(child))
+        ) {
+          throw new Error("Actions must use an external repository and full commit SHA");
+        }
+        if (key.toLowerCase() === "runs-on" && child !== "ubuntu-24.04") {
+          throw new Error("Bootstrap jobs require the fixed GitHub-hosted runner");
+        }
+        pending.push(key, child);
+      }
+    } else if (Array.isArray(value)) {
+      pending.push(...value);
+    } else if (typeof value === "string") {
+      const usesSecrets = [...value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].some((match) =>
+        /\bsecrets\b/i.test(match[1])
+      );
+      if (usesSecrets || /pull_request_target|self-hosted|secrets\./i.test(value)) {
+        throw new Error("Unsafe bootstrap workflow capability");
+      }
+    }
+  }
+  checkWorkflowScopes(root);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [kind, file] = process.argv.slice(2);
+  if (kind === "pins") {
+    checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(file, "utf8"));
+  } else if (kind === "gitleaks") {
+    const result = evaluateGitleaks(
+      JSON.parse(readFileSync(file, "utf8")),
+      Number(process.argv[4]),
+      process.argv[5]
+    );
+    console.log(JSON.stringify(result));
+    if (result.blocking) throw new Error("Undispositioned Gitleaks findings block eligibility");
+  } else {
+    checkReport(kind, JSON.parse(readFileSync(file, "utf8")));
+  }
+  console.log(`${kind}: PASS`);
+}
+
+export { checkPins, checkReport };

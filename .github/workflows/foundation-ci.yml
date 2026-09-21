@@ -1,0 +1,178 @@
+name: Foundation CI
+on:
+  pull_request:
+    branches:
+      - main
+      - feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable
+      - feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable-yaml-policy
+      - feature/sle-118-upgrade-vulnerable-nextjsauthprisma-runtime-dependencies
+      - feature/sle-118-auth-security-patch
+      - feature/sle-118-tar-websocket-security-patch
+      - feature/sle-119-ci-permissions-hardening
+      - feature/sle-118-booking-authorization-repair
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: foundation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  CI: true
+  HUSKY: '0'
+  NEXT_TELEMETRY_DISABLED: '1'
+  TURBO_TELEMETRY_DISABLED: '1'
+  CALCOM_TELEMETRY_DISABLED: '1'
+  NODE_OPTIONS: --max-old-space-size=6144
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/calendso
+  DATABASE_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/calendso
+
+jobs:
+  quality:
+    name: Foundation quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16@sha256:a85daf0dbd5e79586e850e3fe4b21b796799828ad015ce2166aeb98cc24da61c
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sle118_authz_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24.21.0
+      - name: Install the exact locked workspace graph
+        run: |
+          corepack enable
+          node .yarn/releases/yarn-4.12.0.cjs install --immutable
+      - name: Validate workflow and negative gate fixtures
+        run: |
+          node scripts/foundation-gates.mjs pins .github/workflows/foundation-ci.yml
+          node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs scripts/next-security-regression.test.mjs scripts/auth-security-regression.test.mjs scripts/transitive-security-regression.test.mjs scripts/embed-build-copy.test.mjs scripts/foundation-secret-dispositions.test.mjs
+          docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 .github/workflows/foundation-ci.yml
+          docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 scripts/foundation-image.sh
+      - name: Forced type check
+        run: yarn type-check:ci --force
+      - name: Lint changed supported source
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '0c80ce1adc95d1bdd48ab47af487db0023c38316' }}
+        run: node scripts/foundation-lint.mjs
+      - name: Unit tests and standalone Node tests
+        run: yarn test --exclude 'scripts/**' --passWithNoTests=false --maxWorkers=2
+      - name: Real database booking authorization regressions
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sle118_authz_test
+          DATABASE_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/sle118_authz_test
+          VITEST_MODE: integration
+        run: |
+          yarn workspace @calcom/prisma prisma migrate deploy
+          yarn vitest run packages/features/bookings/services/BookingAccessService.integration-test.ts --passWithNoTests=false --maxWorkers=1
+
+  secrets:
+    name: Foundation secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Scan the full tracked tree without untracked credentials or generated evidence
+        run: |
+          mkdir -p "$RUNNER_TEMP/scan" "$RUNNER_TEMP/secret-evidence"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/scan"
+          test ! -e "$RUNNER_TEMP/secret-evidence/gitleaks.json"
+          scan_status=0
+          docker run --rm -v "$RUNNER_TEMP/scan:/scan:ro" -v "$RUNNER_TEMP/secret-evidence:/out" ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb dir /scan --redact --report-format json --report-path /out/gitleaks.json || scan_status=$?
+          node scripts/foundation-gates.mjs gitleaks "$RUNNER_TEMP/secret-evidence/gitleaks.json" "$scan_status" "$RUNNER_TEMP/scan"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: foundation-secrets-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/secret-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  codeql:
+    name: Foundation CodeQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
+        with:
+          output: ${{ runner.temp }}/codeql-evidence
+          upload-database: false
+      - name: Reject unapproved high/critical CodeQL findings
+        run: |
+          mapfile -d '' reports < <(find "$RUNNER_TEMP/codeql-evidence" -name '*.sarif' -print0)
+          test "${#reports[@]}" -gt 0
+          for report in "${reports[@]}"; do node scripts/foundation-gates.mjs codeql "$report"; done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: foundation-codeql-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codeql-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  artifact:
+    name: Foundation artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build, validate and scan one isolated AMD64 artifact
+        env:
+          SLE119_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          EVIDENCE_DIR: ${{ runner.temp }}/image-evidence
+          POSTGRES_IMAGE: postgres:16@sha256:a85daf0dbd5e79586e850e3fe4b21b796799828ad015ce2166aeb98cc24da61c
+          TRIVY_IMAGE: aquasec/trivy@sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9
+          SYFT_IMAGE: anchore/syft@sha256:9ea468e53b16b387d92b253f80a14d07a2d2973e0a5017c57b604b56e6f7cc43
+          BUILDKIT_IMAGE: moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+        run: bash scripts/foundation-image.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: foundation-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/image-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  eligibility:
+    name: Foundation eligibility
+    if: always()
+    needs: [quality, secrets, codeql, artifact]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail on missing, skipped, cancelled or failed required checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: node -e 'const r=JSON.parse(process.env.RESULTS);if(Object.keys(r).length!==4||Object.values(r).some(j=>j.result!=="success"))process.exit(1)'
