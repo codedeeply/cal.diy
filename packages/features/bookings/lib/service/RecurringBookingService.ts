@@ -1,5 +1,6 @@
 import type { CreateBookingMeta, CreateRecurringBookingData } from "@calcom/features/bookings/lib/dto/types";
 import type { BookingResponse } from "@calcom/features/bookings/types";
+import { ErrorWithCode } from "@calcom/lib/errors";
 import { type CreationSource, SchedulingType } from "@calcom/prisma/enums";
 import type { AppsStatus } from "@calcom/types/Calendar";
 import type { IBookingService } from "../interfaces/IBookingService";
@@ -7,6 +8,18 @@ import type { RegularBookingService } from "./RegularBookingService";
 export type BookingHandlerInput = {
   bookingData: CreateRecurringBookingData;
 } & CreateBookingMeta;
+
+export function validateRecurringBookingDataStructure(data: unknown): void {
+  if (!Array.isArray(data) || data.length === 0) {
+    throw ErrorWithCode.Factory.BadRequest("Recurring booking data must be a non-empty array of objects");
+  }
+
+  for (const booking of data) {
+    if (booking === null || typeof booking !== "object" || Array.isArray(booking)) {
+      throw ErrorWithCode.Factory.BadRequest("Recurring booking data must be a non-empty array of objects");
+    }
+  }
+}
 
 export const handleNewRecurringBooking = async function (
   this: RecurringBookingService,
@@ -21,6 +34,7 @@ export const handleNewRecurringBooking = async function (
   }
 ): Promise<BookingResponse[]> {
   const data = input.bookingData;
+  validateRecurringBookingDataStructure(data);
   const { regularBookingService } = deps;
   const createdBookings: BookingResponse[] = [];
   const allRecurringDates: { start: string; end: string | undefined }[] = data.map((booking) => {

@@ -1,6 +1,7 @@
 import process from "node:process";
 import { getServerSession } from "@calcom/features/auth/lib/getServerSession";
 import { getRecurringBookingService } from "@calcom/features/bookings/di/RecurringBookingService.container";
+import { validateRecurringBookingDataStructure } from "@calcom/features/bookings/lib/service/RecurringBookingService";
 import type { BookingResponse } from "@calcom/features/bookings/types";
 import { checkRateLimitAndThrowError } from "@calcom/lib/checkRateLimitAndThrowError";
 import getIP from "@calcom/lib/getIP";
@@ -28,6 +29,7 @@ type RequestMeta = {
 
 async function handler(req: NextApiRequest & RequestMeta) {
   const userIp = getIP(req);
+  validateRecurringBookingDataStructure(req.body);
 
   if (process.env.NEXT_PUBLIC_CLOUDFLARE_USE_TURNSTILE_IN_BOOKER === "1") {
     await checkCfTurnstileToken({
