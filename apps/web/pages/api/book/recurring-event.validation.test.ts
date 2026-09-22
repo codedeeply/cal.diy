@@ -36,6 +36,10 @@ import recurringEventHandler, { handleRecurringEventBooking } from "./recurring-
 
 const turnstileEnvironmentVariable = "NEXT_PUBLIC_CLOUDFLARE_USE_TURNSTILE_IN_BOOKER";
 const originalTurnstileSetting = process.env[turnstileEnvironmentVariable];
+const expectedRateLimit = {
+  identifier: "createRecurringBooking:hashed-ip",
+  rateLimitingType: "core",
+};
 
 function createRequest(body: unknown): NextApiRequest {
   return { body, headers: {}, method: "POST", url: "/api/book/recurring-event" } as unknown as NextApiRequest;
@@ -52,9 +56,8 @@ function createResponse() {
   return response;
 }
 
-function expectNoBookingSideEffects() {
+function expectNoPostRateLimitSideEffects() {
   expect(mocks.checkCfTurnstileToken).not.toHaveBeenCalled();
-  expect(mocks.checkRateLimitAndThrowError).not.toHaveBeenCalled();
   expect(mocks.getServerSession).not.toHaveBeenCalled();
   expect(mocks.createBooking).not.toHaveBeenCalled();
 }
@@ -87,7 +90,8 @@ describe("recurring booking request structure", () => {
         code: ErrorCode.BadRequest,
       });
 
-      expectNoBookingSideEffects();
+      expect(mocks.checkRateLimitAndThrowError).toHaveBeenCalledWith(expectedRateLimit);
+      expectNoPostRateLimitSideEffects();
     });
   });
 
@@ -101,7 +105,21 @@ describe("recurring booking request structure", () => {
     expect(response.json).toHaveBeenCalledWith(
       expect.objectContaining({ message: "Recurring booking data must be a non-empty array of objects" })
     );
-    expectNoBookingSideEffects();
+    expect(mocks.checkRateLimitAndThrowError).toHaveBeenCalledWith(expectedRateLimit);
+    expectNoPostRateLimitSideEffects();
+  });
+
+  it("stops before validation, Turnstile, session, or booking when rate limiting rejects", async () => {
+    process.env[turnstileEnvironmentVariable] = "1";
+    const rateLimitError = new Error("synthetic rate limit rejection");
+    mocks.checkRateLimitAndThrowError.mockRejectedValueOnce(rateLimitError);
+
+    await expect(handleRecurringEventBooking(createRequest([{ cfToken: "synthetic-token" }]))).rejects.toBe(
+      rateLimitError
+    );
+
+    expect(mocks.checkRateLimitAndThrowError).toHaveBeenCalledWith(expectedRateLimit);
+    expectNoPostRateLimitSideEffects();
   });
 
   it("checks Turnstile before preserving valid booking data", async () => {
@@ -121,6 +139,10 @@ describe("recurring booking request structure", () => {
       remoteIp: "127.0.0.1",
       token: "synthetic-token",
     });
+    expect(mocks.checkRateLimitAndThrowError).toHaveBeenCalledWith(expectedRateLimit);
+    expect(mocks.checkRateLimitAndThrowError.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.checkCfTurnstileToken.mock.invocationCallOrder[0]
+    );
     expect(mocks.createBooking).toHaveBeenCalledWith(expect.objectContaining({ bookingData }));
     expect(mocks.checkCfTurnstileToken.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createBooking.mock.invocationCallOrder[0]
@@ -138,6 +160,7 @@ describe("recurring booking request structure", () => {
     await handleRecurringEventBooking(createRequest(bookingData));
 
     expect(mocks.checkCfTurnstileToken).not.toHaveBeenCalled();
+    expect(mocks.checkRateLimitAndThrowError).toHaveBeenCalledWith(expectedRateLimit);
     expect(mocks.createBooking).toHaveBeenCalledWith(expect.objectContaining({ bookingData }));
   });
 });

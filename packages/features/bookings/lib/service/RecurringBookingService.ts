@@ -34,6 +34,9 @@ export const handleNewRecurringBooking = async function (
   }
 ): Promise<BookingResponse[]> {
   const data = input.bookingData;
+  if (!Array.isArray(data)) {
+    throw ErrorWithCode.Factory.BadRequest("Recurring booking data must be a non-empty array of objects");
+  }
   validateRecurringBookingDataStructure(data);
   const { regularBookingService } = deps;
   const createdBookings: BookingResponse[] = [];
