@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -34,12 +34,13 @@ const postcss = web("postcss");
 const sourceContentMarker = ".source-content-marker { color: rebeccapurple }";
 
 const expectedResolutions = {
-  "postcss@8.4.31": "8.5.23",
-  "postcss@8.5.6": "8.5.23",
-  "postcss@^8.3.11": "8.5.23",
-  "postcss@^8.4.23": "8.5.23",
-  "postcss@^8.4.41": "8.5.23",
-  "postcss@^8.5.3": "8.5.23",
+  "postcss@8.4.31": "8.5.28",
+  "postcss@8.5.6": "8.5.28",
+  "postcss@8.5.23": "8.5.28",
+  "postcss@^8.3.11": "8.5.28",
+  "postcss@^8.4.23": "8.5.28",
+  "postcss@^8.4.41": "8.5.28",
+  "postcss@^8.5.3": "8.5.28",
 };
 
 const expectedDependencySelectors = ["8.4.31", "8.5.23", "8.5.6", "^8.3.11", "^8.4.23", "^8.4.41", "^8.5.3"];
@@ -59,8 +60,8 @@ test("the exact PostCSS resolutions cover every installed dependency selector", 
   const lock = yaml.parse(await readFile(resolve("yarn.lock"), "utf8"));
   const postcssEntries = Object.values(lock).filter((entry) => entry.resolution?.startsWith("postcss@npm:"));
   assert.equal(postcssEntries.length, 1);
-  assert.equal(postcssEntries[0].version, "8.5.23");
-  assert.equal(postcssEntries[0].resolution, "postcss@npm:8.5.23");
+  assert.equal(postcssEntries[0].version, "8.5.28");
+  assert.equal(postcssEntries[0].resolution, "postcss@npm:8.5.28");
 
   const dependencySelectors = Object.values(lock)
     .map((entry) => entry.dependencies?.postcss)
@@ -77,7 +78,7 @@ test("the exact PostCSS resolutions cover every installed dependency selector", 
     version(via(atoms, "vite")),
     version(via(web, "@tailwindcss/postcss")),
   ];
-  assert.deepEqual(new Set(installedVersions), new Set(["8.5.23"]));
+  assert.deepEqual(new Set(installedVersions), new Set(["8.5.28"]));
 });
 
 async function withFixture(run) {
@@ -118,6 +119,31 @@ test("GHSA-r28c-9q8g-f849 rejects traversal to a source map outside the CSS dire
     });
     assert.ok(!map.sources.some((source) => source.includes("outside-marker.scss")));
     assert.ok(!map.sourcesContent?.includes(sourceContentMarker));
+  });
+});
+
+test("source map symlinks cannot escape the CSS directory", async () => {
+  await withFixture(async (directory) => {
+    const cssDirectory = join(directory, "css");
+    await mkdir(cssDirectory);
+    await writeFile(join(directory, "outside.map"), sourceMap("symlink-outside-marker.scss"));
+    await symlink("../outside.map", join(cssDirectory, "outside-link.map"));
+
+    const escapedMap = await generatedMap("a{}\n/*# sourceMappingURL=outside-link.map */", {
+      from: join(cssDirectory, "input.css"),
+      to: join(cssDirectory, "output.css"),
+    });
+    assert.ok(!escapedMap.sources.some((source) => source.includes("symlink-outside-marker.scss")));
+    assert.ok(!escapedMap.sourcesContent?.includes(sourceContentMarker));
+
+    await writeFile(join(cssDirectory, "inside.map"), sourceMap("symlink-inside-marker.scss"));
+    await symlink("inside.map", join(cssDirectory, "inside-link.map"));
+    const inTreeMap = await generatedMap("a{}\n/*# sourceMappingURL=inside-link.map */", {
+      from: join(cssDirectory, "input.css"),
+      to: join(cssDirectory, "inside-output.css"),
+    });
+    assert.ok(inTreeMap.sources.some((source) => source.includes("symlink-inside-marker.scss")));
+    assert.ok(inTreeMap.sourcesContent?.includes(sourceContentMarker));
   });
 });
 
