@@ -1,5 +1,4 @@
 import { CAL_URL } from "@calcom/lib/constants";
-
 import type { TextComponent } from "../lib";
 
 /**
@@ -8,11 +7,6 @@ import type { TextComponent } from "../lib";
  * @returns IsValid
  */
 export async function isValidCalURL(url: string) {
-  const regex = new RegExp(
-    `^https://(?:[a-zA-Z0-9-]+\\.)?${CAL_URL.replace("https://", "")}/`,
-    "i"
-  );
-
   const error: TextComponent = {
     type: "text",
     text: `This is not a valid ${CAL_URL.replace("https://", "")} link`,
@@ -20,13 +14,36 @@ export async function isValidCalURL(url: string) {
     align: "left",
   };
 
-  if (!regex.test(url))
+  let candidate: URL;
+  try {
+    candidate = new URL(url);
+  } catch {
+    return { isValid: false, error };
+  }
+
+  const configured = new URL(CAL_URL);
+  const subdomain = candidate.hostname.endsWith(`.${configured.hostname}`)
+    ? candidate.hostname.slice(0, -configured.hostname.length - 1)
+    : "";
+  const matchesHost = candidate.hostname === configured.hostname || /^[a-z0-9-]+$/i.test(subdomain);
+  const pathPrefix = configured.pathname.endsWith("/") ? configured.pathname : `${configured.pathname}/`;
+
+  if (
+    configured.protocol !== "https:" ||
+    candidate.protocol !== "https:" ||
+    candidate.username ||
+    candidate.password ||
+    candidate.port !== configured.port ||
+    !matchesHost ||
+    !candidate.pathname.startsWith(pathPrefix)
+  )
     return {
       isValid: false,
       error,
     };
 
-  const response = await fetch(url);
+  // A valid Cal link can itself redirect to an unrelated host; never follow that redirect.
+  const response = await fetch(candidate.toString(), { redirect: "manual" });
 
   if (response.status !== 200)
     return {
