@@ -42,8 +42,15 @@ export async function isValidCalURL(url: string) {
       error,
     };
 
+  // Construct the destination from the configured origin, never from the submitted URL's authority.
+  const destination = new URL(configured.origin);
+  if (subdomain) destination.hostname = `${subdomain}.${configured.hostname}`;
+  destination.pathname = candidate.pathname;
+  destination.search = candidate.search;
+  destination.hash = candidate.hash;
+
   // A valid Cal link can itself redirect to an unrelated host; never follow that redirect.
-  const response = await fetch(candidate.toString(), { redirect: "manual" });
+  const response = await fetch(destination, { redirect: "manual" });
 
   if (response.status !== 200)
     return {

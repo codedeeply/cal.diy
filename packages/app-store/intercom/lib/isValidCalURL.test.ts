@@ -43,7 +43,14 @@ describe("Intercom Cal link validation", () => {
     "https://cal.com/",
   ])("checks a legitimate link without following a redirect: %s", async (url) => {
     expect(await isValidCalURL(url)).toEqual({ isValid: true });
-    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(url, { redirect: "manual" });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(new URL(url), { redirect: "manual" });
+  });
+
+  it("keeps an authority-like path and query on the trusted origin", async () => {
+    const url = "https://cal.com//attacker.example/alice?next=https%3A%2F%2Fattacker.example%2F#details";
+
+    expect(await isValidCalURL(url)).toEqual({ isValid: true });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(new URL(url), { redirect: "manual" });
   });
 
   it("rejects a redirect response without contacting its destination", async () => {
@@ -53,7 +60,7 @@ describe("Intercom Cal link validation", () => {
     } as Response);
 
     expect(await isValidCalURL("https://cal.com/alice/meeting")).toMatchObject({ isValid: false });
-    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("https://cal.com/alice/meeting", {
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(new URL("https://cal.com/alice/meeting"), {
       redirect: "manual",
     });
   });
@@ -69,7 +76,7 @@ describe("Intercom Cal link validation", () => {
     const validURL = "https://team.booking.example:8443/base/alice/meeting";
 
     expect(await isValidCalURL(validURL)).toEqual({ isValid: true });
-    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(validURL, { redirect: "manual" });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(new URL(validURL), { redirect: "manual" });
 
     fetchMock.mockClear();
     for (const url of [
