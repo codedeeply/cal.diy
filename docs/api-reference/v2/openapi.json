@@ -7071,7 +7071,7 @@
           "data": {
             "example": {
               "clientId": "clsx38nbl0001vkhlwin9fmt0",
-              "clientSecret": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoib2F1dGgtY2xpZW50Iiwi"
+              "clientSecret": "<GENERATED_OAUTH_CLIENT_SECRET>"
             },
             "allOf": [
               {
