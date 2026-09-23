@@ -75,8 +75,8 @@ REDIS_URL=redis://redis:6379
 JWT_SECRET=your_random_jwt_secret_here
 NEXTAUTH_SECRET=your_nextauth_secret_here
 CALENDSO_ENCRYPTION_KEY=your_32_character_encryption_key
-STRIPE_API_KEY=sk_test_your_stripe_key
-STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+STRIPE_API_KEY=<your Stripe test-mode key>
+STRIPE_WEBHOOK_SECRET=<your Stripe test-mode webhook secret>
 
 # Optional (have sensible defaults)
 WEB_APP_URL=https://cal.yourdomain.com
@@ -84,7 +84,7 @@ REDIS_PORT=6379
 LOG_LEVEL=warn
 ```
 
-> **Note:** `STRIPE_API_KEY` is the API v2 equivalent of `STRIPE_PRIVATE_KEY` used by the web app. Both are Stripe secret keys but are consumed by different services. If you don't need Stripe functionality in the API, you can set a placeholder value (e.g., `sk_test_placeholder`), but the variable must be present.
+> **Note:** `STRIPE_API_KEY` is the API v2 equivalent of `STRIPE_PRIVATE_KEY` used by the web app. Both are Stripe secret keys but are consumed by different services. If you don't need Stripe functionality in the API, use a noncredential placeholder, but the variable must be present.
 
 You can generate secure secrets with:
 
