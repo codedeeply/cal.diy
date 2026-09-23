@@ -84,6 +84,36 @@ function checkReport(kind, report) {
   }
 }
 
+/** Unfiltered PR events keep required checks present for future stack bases. */
+function checkWorkflowEvents(root) {
+  const events = root.get("on");
+  if (
+    !(events instanceof Map) ||
+    events.size !== 3 ||
+    ["pull_request", "push", "workflow_dispatch"].some((event) => !events.has(event))
+  ) {
+    throw new Error("Expected only the required Foundation events");
+  }
+  const pullRequest = events.get("pull_request");
+  if (pullRequest !== null && (!(pullRequest instanceof Map) || pullRequest.size !== 0)) {
+    throw new Error("Pull requests must be unfiltered for every target branch and default activity");
+  }
+  const push = events.get("push");
+  if (
+    !(push instanceof Map) ||
+    push.size !== 1 ||
+    !Array.isArray(push.get("branches")) ||
+    push.get("branches").length !== 1 ||
+    push.get("branches")[0] !== "main"
+  ) {
+    throw new Error("Push must remain limited to main");
+  }
+  const dispatch = events.get("workflow_dispatch");
+  if (dispatch !== null && (!(dispatch instanceof Map) || dispatch.size !== 0)) {
+    throw new Error("Workflow dispatch must remain unfiltered");
+  }
+}
+
 /** Explicit scopes prevent inherited token grants and conditional gate skipping. */
 function checkWorkflowScopes(root) {
   const jobs = root.get("jobs");
@@ -206,6 +236,7 @@ function checkPins(dockerfile, workflow) {
       }
     }
   }
+  checkWorkflowEvents(root);
   checkWorkflowScopes(root);
 }
 
