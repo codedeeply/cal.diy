@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { createInheritedCheck, generateBaseline, loadBaseline } from "./foundation-baseline.mjs";
+import { evaluateGitleaks } from "./foundation-secret-dispositions.mjs";
 
 /** Missing or malformed evidence must not turn a security check green. */
 function requireArray(value, label) {
@@ -13,7 +14,8 @@ function requireArray(value, label) {
 
 /**
  * Without `isInherited` this is the strict publication gate. Source merge passes the approved
- * inherited-finding check instead; report validation is identical in both modes.
+ * inherited-finding check instead; report validation is identical in both modes, and neither
+ * infers an approval from a finding's own fields.
  */
 function checkReport(kind, report, isInherited = () => false) {
   if (kind === "gitleaks") {
@@ -88,6 +90,36 @@ function checkReport(kind, report, isInherited = () => false) {
         throw new Error(`Unapproved ${kind} finding: ${finding.VulnerabilityID ?? finding.ID}`);
       }
     }
+  }
+}
+
+/** Unfiltered PR events keep required checks present for future stack bases. */
+function checkWorkflowEvents(root) {
+  const events = root.get("on");
+  if (
+    !(events instanceof Map) ||
+    events.size !== 3 ||
+    ["pull_request", "push", "workflow_dispatch"].some((event) => !events.has(event))
+  ) {
+    throw new Error("Expected only the required Foundation events");
+  }
+  const pullRequest = events.get("pull_request");
+  if (pullRequest !== null && (!(pullRequest instanceof Map) || pullRequest.size !== 0)) {
+    throw new Error("Pull requests must be unfiltered for every target branch and default activity");
+  }
+  const push = events.get("push");
+  if (
+    !(push instanceof Map) ||
+    push.size !== 1 ||
+    !Array.isArray(push.get("branches")) ||
+    push.get("branches").length !== 1 ||
+    push.get("branches")[0] !== "main"
+  ) {
+    throw new Error("Push must remain limited to main");
+  }
+  const dispatch = events.get("workflow_dispatch");
+  if (dispatch !== null && (!(dispatch instanceof Map) || dispatch.size !== 0)) {
+    throw new Error("Workflow dispatch must remain unfiltered");
   }
 }
 
@@ -240,6 +272,7 @@ function checkPins(dockerfile, workflow) {
       }
     }
   }
+  checkWorkflowEvents(root);
   checkWorkflowScopes(root);
 }
 
@@ -265,7 +298,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // re-run the strict gate, and this evidence records its verdict for every run.
     let publication = { kind, eligible: true };
     try {
-      checkReport(kind, report);
+      if (kind === "gitleaks") {
+        // Publication honours only the 167 exact-source non-credential dispositions Sierra approved.
+        const secrets = evaluateGitleaks(report, Number(process.argv[4]), sourceRoot);
+        console.log(JSON.stringify(secrets));
+        if (secrets.blocking) throw new Error(`${secrets.blocking} undispositioned Gitleaks findings`);
+      } else {
+        checkReport(kind, report);
+      }
     } catch (error) {
       publication = { kind, eligible: false, reason: error.message };
     }

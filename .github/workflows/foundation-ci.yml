@@ -1,13 +1,6 @@
 name: Foundation CI
 on:
   pull_request:
-    branches:
-      - main
-      - feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable
-      - feature/sle-119-enforce-ci-supply-chain-gates-and-publish-a-signed-immutable-yaml-policy
-      - feature/sle-118-upgrade-vulnerable-nextjsauthprisma-runtime-dependencies
-      - feature/sle-118-auth-security-patch
-      - feature/sle-118-tar-websocket-security-patch
   push:
     branches: [main]
   workflow_dispatch:
@@ -35,6 +28,17 @@ jobs:
     name: Foundation quality
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16@sha256:a85daf0dbd5e79586e850e3fe4b21b796799828ad015ce2166aeb98cc24da61c
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sle118_authz_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -50,7 +54,7 @@ jobs:
       - name: Validate workflow and negative gate fixtures
         run: |
           node scripts/foundation-gates.mjs pins .github/workflows/foundation-ci.yml
-          node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs scripts/next-security-regression.test.mjs scripts/auth-security-regression.test.mjs scripts/transitive-security-regression.test.mjs scripts/embed-build-copy.test.mjs
+          node --test scripts/check-platform-scan.test.mjs scripts/foundation-gates.test.mjs scripts/next-security-regression.test.mjs scripts/auth-security-regression.test.mjs scripts/transitive-security-regression.test.mjs scripts/axios-security-regression.test.mjs scripts/xmldom-security-regression.test.mjs scripts/brace-expansion-security-regression.test.mjs scripts/fast-uri-security-regression.test.mjs scripts/postcss-security-regression.test.mjs scripts/embed-build-copy.test.mjs scripts/foundation-secret-dispositions.test.mjs scripts/doc-secret-example-regression.test.mjs
           docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 .github/workflows/foundation-ci.yml
           docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 scripts/foundation-image.sh
       - name: Forced type check
@@ -63,6 +67,14 @@ jobs:
         run: node --test scripts/foundation-baseline.test.mjs
       - name: Unit tests and standalone Node tests
         run: yarn test --exclude 'scripts/**' --passWithNoTests=false --maxWorkers=2
+      - name: Real database booking authorization regressions
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sle118_authz_test
+          DATABASE_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/sle118_authz_test
+          VITEST_MODE: integration
+        run: |
+          yarn workspace @calcom/prisma prisma migrate deploy
+          yarn vitest run packages/features/bookings/services/BookingAccessService.integration-test.ts --passWithNoTests=false --maxWorkers=1
 
   secrets:
     name: Foundation secrets

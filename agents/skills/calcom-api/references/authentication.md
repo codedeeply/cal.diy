@@ -23,10 +23,11 @@ The primary authentication method for most API consumers.
 ### Using API Keys
 
 Include the API key in the `Authorization` header with the `Bearer` prefix:
+Supply `CAL_API_KEY` from your credential manager as an exported shell variable before running the API-key examples below. Do not put a key in this document or your shell history. Each request fails locally if its required variable is unset or empty.
 
 ```http
 GET /v2/bookings
-Authorization: Bearer cal_live_abc123xyz...
+Authorization: Bearer <CAL_API_KEY>
 ```
 
 ### API Key Format
@@ -39,7 +40,7 @@ All Cal.diy API keys are prefixed with `cal_`:
 
 ```bash
 curl -X GET "https://api.cal.com/v2/bookings" \
-  -H "Authorization: Bearer cal_live_abc123xyz789" \
+  -H "Authorization: Bearer ${CAL_API_KEY:?Set CAL_API_KEY before this request}" \
   -H "Content-Type: application/json"
 ```
 
@@ -49,7 +50,7 @@ Generate a new API key and invalidate the current one:
 
 ```http
 POST /v2/api-keys/refresh
-Authorization: Bearer cal_live_current_key
+Authorization: Bearer <CAL_API_KEY>
 Content-Type: application/json
 
 {
@@ -90,11 +91,13 @@ Platform customers use additional headers alongside or instead of the Bearer tok
 
 ### Example Platform Request
 
+Supply `CAL_CLIENT_ID`, `CAL_CLIENT_SECRET`, and `CAL_MANAGED_USER_TOKEN` from your credential manager as exported shell variables. The managed-user token is distinct from `CAL_API_KEY`; all three variables are required for this example.
+
 ```bash
 curl -X GET "https://api.cal.com/v2/bookings" \
-  -H "x-cal-client-id: your_client_id" \
-  -H "x-cal-secret-key: your_secret_key" \
-  -H "Authorization: Bearer managed_user_access_token" \
+  -H "x-cal-client-id: ${CAL_CLIENT_ID:?Set CAL_CLIENT_ID before this request}" \
+  -H "x-cal-secret-key: ${CAL_CLIENT_SECRET:?Set CAL_CLIENT_SECRET before this request}" \
+  -H "Authorization: Bearer ${CAL_MANAGED_USER_TOKEN:?Set CAL_MANAGED_USER_TOKEN before this request}" \
   -H "Content-Type: application/json"
 ```
 
@@ -105,13 +108,13 @@ curl -X GET "https://api.cal.com/v2/bookings" \
 GET /v2/bookings
 x-cal-client-id: your_client_id
 x-cal-secret-key: your_secret_key
-Authorization: Bearer managed_user_access_token
+Authorization: Bearer <MANAGED_USER_ACCESS_TOKEN>
 ```
 
 **For platform-level operations (managing OAuth clients):**
 ```http
 GET /v2/oauth-clients
-Authorization: Bearer cal_live_platform_admin_key
+Authorization: Bearer <CAL_API_KEY>
 ```
 
 ## API Versioning
@@ -126,7 +129,7 @@ cal-api-version: 2024-08-13
 
 ```bash
 curl -X POST "https://api.cal.com/v2/bookings" \
-  -H "Authorization: Bearer cal_live_abc123" \
+  -H "Authorization: Bearer ${CAL_API_KEY:?Set CAL_API_KEY before this request}" \
   -H "cal-api-version: 2024-08-13" \
   -H "Content-Type: application/json" \
   -d '{"start": "2024-01-15T10:00:00Z", "eventTypeId": 123, ...}'
@@ -178,9 +181,7 @@ Common causes:
 1. **Never expose API keys in client-side code**: API keys should only be used in server-side applications
 
 2. **Use environment variables**: Store API keys in environment variables, not in code
-   ```bash
-   export CAL_API_KEY="cal_live_abc123..."
-   ```
+   Supply `CAL_API_KEY` from your credential manager before running the guarded shell examples; never copy an example key into your environment.
 
 3. **Rotate keys regularly**: Use the refresh endpoint to rotate keys periodically
 
@@ -226,7 +227,7 @@ Verify your API key is working:
 
 ```bash
 curl -X GET "https://api.cal.com/v2/me" \
-  -H "Authorization: Bearer cal_live_your_api_key" \
+  -H "Authorization: Bearer ${CAL_API_KEY:?Set CAL_API_KEY before this request}" \
   -H "Content-Type: application/json"
 ```
 
