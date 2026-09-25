@@ -47,7 +47,7 @@ Then in the `packages/platform/examples/base/.env` set the `NEXT_PUBLIC_OAUTH2_C
   {
     "id": "clxyyy21o0003sbk7yw5z6tzg",
     "name": "Acme",
-    "secret": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1lIjoiQWNtZSAiLCJwZXJtaXNzaW9ucyI6MTAyMywicmVkaXJlY3RVcmlzIjpbImh0dHA6Ly9sb2NhbGhvc3Q6NDMyMSJdLCJib29raW5nUmVkaXJlY3RVcmkiOiIiLCJib29raW5nQ2FuY2VsUmVkaXJlY3RVcmkiOiIiLCJib29raW5nUmVzY2hlZHVsZVJlZGlyZWN0VXJpIjoiIiwiYXJlRW1haWxzRW5hYmxlZCI6dHJ1ZSwiaWF0IjoxNzE5NTk1ODA4fQ.L5_jSS14fcKLCD_9_DAOgtGd6lUSZlU5CEpCPaPt41I",
+    "secret": "<GENERATED_PLATFORM_CLIENT_SECRET>",
     "permissions": 1023,
     "logo": null,
     "redirectUris": "{http://localhost:4321}",
@@ -85,7 +85,7 @@ Then create a new entry in the OAuthClient table with the random id and hashed s
   {
     "clientId": "1c70be53f35aa480a5e3146d361fd993d265e564d2d86a203df3adbd05186517",
     "redirectUri": "http://localhost:4321",
-    "clientSecret": "970db2cf14112013ba3a510b945294fef8737d42ee58c32031d2351692068ce7",
+    "clientSecret": "<HASHED_SECRET_FROM_GENERATOR>",
     "name": "atoms examples app oauth 2 client",
     "logo": null,
     "clientType": "confidential",
