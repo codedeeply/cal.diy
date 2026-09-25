@@ -1,17 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
-
 import {
-  V2_ENDPOINTS,
-  SUCCESS_STATUS,
   CAL_API_VERSION_HEADER,
+  SUCCESS_STATUS,
+  V2_ENDPOINTS,
   VERSION_2024_08_13,
 } from "@calcom/platform-constants";
 import type { GetBookingOutput_2024_08_13 } from "@calcom/platform-types";
-
+import { useQuery } from "@tanstack/react-query";
 import http from "../../lib/http";
 
 export const useBooking = (uid: string) => {
-  const pathname = `/${V2_ENDPOINTS.bookings}/${uid}`;
+  // The uid often comes straight from the page URL; encoding it keeps it a single path segment.
+  const pathname = `/${V2_ENDPOINTS.bookings}/${encodeURIComponent(uid)}`;
   const headers = {
     [CAL_API_VERSION_HEADER]: VERSION_2024_08_13,
   };
