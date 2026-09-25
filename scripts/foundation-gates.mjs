@@ -314,7 +314,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       `${JSON.stringify(publication)}\n`
     );
     console.log(`${kind} publication: ${publication.eligible ? "PASS" : `BLOCKED (${publication.reason})`}`);
-    checkReport(kind, report, createInheritedCheck(kind, loadBaseline(), { sourceRoot, report }));
+    checkReport(kind, report, createInheritedCheck(kind, loadBaseline(), { sourceRoot }));
   } else {
     checkReport(kind, readJson(file));
   }

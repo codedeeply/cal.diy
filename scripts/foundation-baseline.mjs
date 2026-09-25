@@ -4,15 +4,10 @@ import { join } from "node:path";
 
 const baselinePath = ".github/sle-119/inherited-baseline.json";
 // Pinning the approved inventory in code makes any edit to it a reviewable gate change.
-const baselineHash = "dfb8e3dd24725006c1f33069d013ca8e8e3941511f43b98755ab96a3f78afcd8";
+const baselineHash = "9fec7e33793fbd5bf0ecb54f7307652966a0e7dc3394960e8271bb96ef0b0f82";
 const kinds = ["gitleaks", "codeql", "dependencies", "image"];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const key = (...parts) => JSON.stringify(parts);
-
-function requireArray(value, label) {
-  if (!Array.isArray(value)) throw new Error(`Missing/invalid ${label}`);
-  return value;
-}
 
 function requireString(value, label) {
   if (typeof value !== "string" || !value) throw new Error(`Missing/invalid ${label}`);
@@ -52,9 +47,12 @@ function identityOf(kind, finding, context) {
     return key(file.slice(6), requireString(finding.RuleID, "Gitleaks rule"), flagged);
   }
   if (kind === "codeql") {
+    // CodeQL's content-based line hash survives edits elsewhere in the file, so a new result
+    // cannot reuse the allowance of a fixed one that shares its rule and file.
     return key(
       requireString(finding?.ruleId ?? finding?.rule?.id, "CodeQL rule"),
-      requireString(finding.locations?.[0]?.physicalLocation?.artifactLocation?.uri, "CodeQL location")
+      requireString(finding.locations?.[0]?.physicalLocation?.artifactLocation?.uri, "CodeQL location"),
+      requireString(finding.partialFingerprints?.primaryLocationLineHash, "CodeQL result fingerprint")
     );
   }
   return key(
@@ -91,12 +89,6 @@ function loadBaseline(root = ".", expectedHash = baselineHash) {
   return baseline;
 }
 
-/**
- * Source merge accepts only inherited findings (SLE-116 v0.1.1 addendum). Each inherited
- * identity is consumed once, so a PR cannot add another instance of an existing finding. A
- * Trivy finding on a package version already shipped at baseline is also inherited: a newly
- * published advisory then blocks publication rather than an unrelated PR.
- */
 function sourceReader(sourceRoot) {
   const cache = new Map();
   return (file) => {
@@ -105,7 +97,14 @@ function sourceReader(sourceRoot) {
   };
 }
 
-function createInheritedCheck(kind, baseline, { sourceRoot, report } = {}) {
+/**
+ * Source merge accepts only inherited findings (SLE-116 v0.1.1 addendum). Each inherited
+ * identity is consumed once, so a PR cannot add another instance of an existing finding. A
+ * Trivy advisory absent from the inventory is still inherited when it affects a package version
+ * already shipped at baseline: an advisory published later then blocks publication, not an
+ * unrelated PR.
+ */
+function createInheritedCheck(kind, baseline, { sourceRoot } = {}) {
   if (!kinds.includes(kind)) throw new Error(`No inherited inventory for ${kind}`);
   const remaining = new Map();
   for (const identity of baseline[kind].findings) remaining.set(identity, (remaining.get(identity) ?? 0) + 1);
@@ -127,15 +126,13 @@ function createInheritedCheck(kind, baseline, { sourceRoot, report } = {}) {
         requireString(finding.InstalledVersion, "installed version")
       )
     );
-  // Shipped versions claim their inherited advisories first, over the whole report, so only
-  // allowances left over can cover a new version. An upgrade that replaces a shipped version
-  // may keep an inherited advisory, but an added copy alongside it cannot, in any order.
-  for (const result of requireArray(report?.Results, "Trivy results")) {
-    for (const finding of result.Vulnerabilities ?? []) {
-      if (isShipped(finding, result)) consume(identityOf(kind, finding, result));
-    }
-  }
-  return (finding, result) => isShipped(finding, result) || consume(identityOf(kind, finding, result));
+  const inventoried = new Set(baseline[kind].findings);
+  // Counting every instance of an inventoried advisory keeps the verdict independent of report
+  // order and stops an added copy, of any version, from reusing an allowance.
+  return (finding, result) => {
+    const identity = identityOf(kind, finding, result);
+    return inventoried.has(identity) ? consume(identity) : isShipped(finding, result);
+  };
 }
 
 /**
