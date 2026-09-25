@@ -153,7 +153,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const [gitleaks, codeql, dependencies, image, metadata] = process.argv.slice(3, 8).map(readJson);
     const reports = { gitleaks, codeql, dependencies, image };
     const baseline = generateBaseline(reports, metadata, checkReport, process.argv[8]);
-    process.stdout.write(`${JSON.stringify(baseline, null, 1)}\n`);
+    process.stdout.write(`${JSON.stringify(baseline, null, 2)}\n`);
     process.exit(0);
   } else if (["gitleaks", "codeql", "dependencies", "image"].includes(kind)) {
     const report = readJson(file);

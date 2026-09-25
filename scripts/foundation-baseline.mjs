@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const baselinePath = ".github/sle-119/inherited-baseline.json";
 // Pinning the approved inventory in code makes any edit to it a reviewable gate change.
-const baselineHash = "cc05d2cfa2a200b904dba35c24df3ba62a5ae1d86f1eeed9f46ad09e6eb1d566";
+const baselineHash = "dfb8e3dd24725006c1f33069d013ca8e8e3941511f43b98755ab96a3f78afcd8";
 const kinds = ["gitleaks", "codeql", "dependencies", "image"];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const key = (...parts) => JSON.stringify(parts);
