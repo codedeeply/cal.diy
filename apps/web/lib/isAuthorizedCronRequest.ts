@@ -6,18 +6,19 @@ type CronAuthOptions = {
 };
 
 /**
- * An empty or unset credential must never authenticate: `CRON_API_KEY=` copied from
- * `.env.example` would otherwise match `?apiKey=`, and an unset `CRON_SECRET` would match the
- * literal header `Bearer undefined`.
+ * An empty or unset credential must never authenticate: the blank API key value shipped in
+ * `.env.example` would otherwise match an empty `apiKey` query parameter, and an unset cron
+ * secret would match the literal header `Bearer undefined`.
  */
 export function isAuthorizedCronRequest(
   apiKey: string | null,
   { allowCronSecret = false }: CronAuthOptions = {}
 ): boolean {
   if (!apiKey) return false;
-  // A deliberately quoted blank value is as unconfigured as an empty one.
-  const cronApiKey = process.env.CRON_API_KEY?.trim();
-  if (cronApiKey && apiKey === cronApiKey) return true;
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  return allowCronSecret && Boolean(cronSecret) && apiKey === `Bearer ${cronSecret}`;
+  // Trimming only detects a deliberately quoted blank value; matching stays exact so a
+  // configured credential is compared byte-for-byte, as before.
+  const cronApiKey = process.env.CRON_API_KEY;
+  if (cronApiKey?.trim() && apiKey === cronApiKey) return true;
+  const cronSecret = process.env.CRON_SECRET;
+  return allowCronSecret && Boolean(cronSecret?.trim()) && apiKey === `Bearer ${cronSecret}`;
 }

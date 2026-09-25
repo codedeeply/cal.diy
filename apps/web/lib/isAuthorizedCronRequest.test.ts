@@ -26,6 +26,12 @@ describe("isAuthorizedCronRequest", () => {
     }
   });
 
+  it("compares a configured credential exactly, without trimming it", () => {
+    vi.stubEnv("CRON_API_KEY", " padded-key ");
+    expect(isAuthorizedCronRequest(" padded-key ")).toBe(true);
+    expect(isAuthorizedCronRequest("padded-key")).toBe(false);
+  });
+
   it("treats whitespace-only credentials as unconfigured", () => {
     vi.stubEnv("CRON_API_KEY", " ");
     vi.stubEnv("CRON_SECRET", " ");
