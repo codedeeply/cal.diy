@@ -63,6 +63,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '0c80ce1adc95d1bdd48ab47af487db0023c38316' }}
         run: node scripts/foundation-lint.mjs
+      - name: Inherited-finding ratchet fixtures
+        run: node --test scripts/foundation-baseline.test.mjs
       - name: Unit tests and standalone Node tests
         run: yarn test --exclude 'scripts/**' --passWithNoTests=false --maxWorkers=2
       - name: Real database booking authorization regressions
@@ -121,7 +123,7 @@ jobs:
       - name: Reject unapproved high/critical CodeQL findings
         run: |
           mapfile -d '' reports < <(find "$RUNNER_TEMP/codeql-evidence" -name '*.sarif' -print0)
-          test "${#reports[@]}" -gt 0
+          test "${#reports[@]}" -eq 1
           for report in "${reports[@]}"; do node scripts/foundation-gates.mjs codeql "$report"; done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
