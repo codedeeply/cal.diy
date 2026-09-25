@@ -1,23 +1,23 @@
 import { stringify } from "node:querystring";
-
 import dayjs from "@calcom/dayjs";
 import { getLocation } from "@calcom/lib/CalEventParser";
+import { ErrorWithCode } from "@calcom/lib/errors";
 import logger from "@calcom/lib/logger";
 import prisma from "@calcom/prisma";
 import type {
   Calendar,
-  CalendarServiceEvent,
   CalendarEvent,
+  CalendarServiceEvent,
   EventBusyDate,
   GetAvailabilityParams,
   IntegrationCalendar,
   NewCalendarEventType,
 } from "@calcom/types/Calendar";
 import type { CredentialPayload } from "@calcom/types/Credential";
-
 import getAppKeysFromSlug from "../../_utils/getAppKeysFromSlug";
-import type { ZohoAuthCredentials, FreeBusy, ZohoCalendarListResp } from "../types/ZohoCalendar";
+import type { FreeBusy, ZohoAuthCredentials, ZohoCalendarListResp } from "../types/ZohoCalendar";
 import { appKeysSchema as zohoKeysSchema } from "../zod";
+import { isKnownZohoDomain } from "./serverLocation";
 
 class ZohoCalendarService implements Calendar {
   private integrationName = "";
@@ -82,6 +82,13 @@ class ZohoCalendarService implements Calendar {
 
     return {
       getToken: async () => {
+        // Credentials saved before the callback allowlisted data centers may name any host;
+        // refusing them keeps our client secret and the user's tokens on Zoho.
+        if (!isKnownZohoDomain(zohoCredentials.server_location)) {
+          throw ErrorWithCode.Factory.BadRequest(
+            "Zoho Calendar credential has an unknown server location; reconnect Zoho Calendar"
+          );
+        }
         const isExpired = () => new Date(zohoCredentials.expires_in * 1000).getTime() <= new Date().getTime();
         return !isExpired() ? Promise.resolve(zohoCredentials) : refreshAccessToken();
       },
@@ -470,9 +477,9 @@ class ZohoCalendarService implements Calendar {
       reminders: [
         {
           minutes: "-15",
-            action: "popup",
-          },
-        ],
+          action: "popup",
+        },
+      ],
       location: event.location
         ? getLocation({
             videoCallData: event.videoCallData,
