@@ -125,7 +125,9 @@ test("CLI rejects unapproved findings, scanner errors and missing report", () =>
     writeFileSync(report, JSON.stringify(findings));
     const accepted = spawnSync(
       process.execPath,
-      ["scripts/foundation-gates.mjs", "gitleaks", report, "1", "."],
+      // The CLI scans its root for suppressions, as CI does on an archived tree; the working
+      // checkout would include installed dependencies that Gitleaks never scans.
+      ["scripts/foundation-gates.mjs", "gitleaks", report, "1", directory],
       { encoding: "utf8" }
     );
     assert.equal(accepted.status, 0, accepted.stderr);
@@ -138,7 +140,7 @@ test("CLI rejects unapproved findings, scanner errors and missing report", () =>
     ]) {
       const result = spawnSync(
         process.execPath,
-        ["scripts/foundation-gates.mjs", "gitleaks", path, status, "."],
+        ["scripts/foundation-gates.mjs", "gitleaks", path, status, directory],
         { encoding: "utf8" }
       );
       assert.notEqual(result.status, 0);
