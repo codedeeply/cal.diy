@@ -26,12 +26,25 @@ isolation. Disabling isolation contaminates shared mocks. No failing test is wai
 
 ## Fail-closed boundary
 
-No inherited-finding inventory or security exception is approved. Raw high and
-critical image/configuration findings block; unknown severities, malformed reports,
-CodeQL scores >=7 and any Gitleaks finding also block. Fixability does not erase a
-finding. Known application criticals therefore keep this bootstrap red. A false
-positive or source-only inherited allowance needs Sierra's explicit A2 decision
-and a separately reviewed, machine-readable inventory; do not weaken this gate.
+Two verdicts are computed from the same validated reports (SLE-123):
+
+- **Source merge** (enforced by these required checks) accepts only findings in
+  `inherited-baseline.json`, the inventory Sierra approved in the
+  [SLE-116 v0.1.1 addendum](https://linear.app/sam-thacker-studios/issue/SLE-116#comment-773bac72-ec5e-4f2a-bcc0-02d90e8ed1f7).
+  It was generated from full scans of `main` `0c80ce1` and is pinned by SHA-256 in
+  `scripts/foundation-baseline.mjs`. Secret and CodeQL identities are
+  `(file, rule)` counts, so an extra instance of an inherited finding still blocks.
+  A Trivy finding is inherited when the baseline had that advisory for the package,
+  or when that exact package version was already shipped at baseline.
+- **Publication** stays strict: raw high, critical and unknown image/dependency
+  findings, CodeQL scores >=7 and any undispositioned Gitleaks finding block.
+  The verdict is printed as `<kind> publication: BLOCKED (...)` on every run; the
+  SLE-119 publish job must enforce it before any artifact is signed.
+
+Malformed reports, missing scan coverage and configuration findings fail both.
+Changing the inventory or its hash is a Sierra A2 policy decision. Lowering it
+after a remediation (ratchet down) is the only routine edit; regenerate it with
+`node scripts/foundation-gates.mjs generate-baseline` from raw evidence.
 
 Negative fixtures prove report rejection, including deliberately unsafe image,
 action, secret, vulnerability and CodeQL inputs. They do not substitute for real

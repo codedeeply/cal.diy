@@ -53,6 +53,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || '0c80ce1adc95d1bdd48ab47af487db0023c38316' }}
         run: node scripts/foundation-lint.mjs
+      - name: Inherited-finding ratchet fixtures
+        run: node --test scripts/foundation-baseline.test.mjs
       - name: Unit tests and standalone Node tests
         run: yarn test --exclude 'scripts/**' --passWithNoTests=false --maxWorkers=2
 
@@ -68,8 +70,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/scan" "$RUNNER_TEMP/secret-evidence"
           git archive HEAD | tar -x -C "$RUNNER_TEMP/scan"
-          docker run --rm -v "$RUNNER_TEMP/scan:/scan:ro" -v "$RUNNER_TEMP/secret-evidence:/out" ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb dir /scan --redact --report-format json --report-path /out/gitleaks.json
-          node scripts/foundation-gates.mjs gitleaks "$RUNNER_TEMP/secret-evidence/gitleaks.json"
+          test ! -e "$RUNNER_TEMP/secret-evidence/gitleaks.json"
+          scan_status=0
+          docker run --rm -v "$RUNNER_TEMP/scan:/scan:ro" -v "$RUNNER_TEMP/secret-evidence:/out" ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb dir /scan --redact --report-format json --report-path /out/gitleaks.json || scan_status=$?
+          node scripts/foundation-gates.mjs gitleaks "$RUNNER_TEMP/secret-evidence/gitleaks.json" "$scan_status" "$RUNNER_TEMP/scan"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
