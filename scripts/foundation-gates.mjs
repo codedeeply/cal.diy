@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import { createInheritedCheck, generateBaseline, loadBaseline } from "./foundation-baseline.mjs";
 import { evaluateGitleaks } from "./foundation-secret-dispositions.mjs";
 
 /** Missing or malformed evidence must not turn a security check green. */
@@ -10,10 +12,16 @@ function requireArray(value, label) {
   return value;
 }
 
-/** General report evaluation never infers an approval from a finding's own fields. */
-function checkReport(kind, report) {
+/**
+ * Without `isInherited` this is the strict publication gate. Source merge passes the approved
+ * inherited-finding check instead; report validation is identical in both modes, and neither
+ * infers an approval from a finding's own fields.
+ */
+function checkReport(kind, report, isInherited = () => false) {
   if (kind === "gitleaks") {
-    if (requireArray(report, "Gitleaks findings").length) throw new Error("Gitleaks findings require review");
+    for (const finding of requireArray(report, "Gitleaks findings")) {
+      if (!isInherited(finding)) throw new Error("Gitleaks findings require review");
+    }
     return;
   }
   if (kind === "codeql") {
@@ -46,8 +54,9 @@ function checkReport(kind, report) {
         const rawScore = rule.properties?.["security-severity"];
         if (typeof rawScore !== "string" || !rawScore.trim()) throw new Error("Missing CodeQL severity");
         const score = Number(rawScore);
-        if (!Number.isFinite(score) || score < 0 || score >= 7 || finding.level === "error") {
-          throw new Error(`Unapproved CodeQL finding: ${finding.ruleId}`);
+        if (!Number.isFinite(score) || score < 0) throw new Error("Invalid CodeQL severity");
+        if ((score >= 7 || finding.level === "error") && !isInherited(finding, run)) {
+          throw new Error(`Unapproved CodeQL finding: ${ruleId}`);
         }
       }
     }
@@ -77,7 +86,7 @@ function checkReport(kind, report) {
       if (!["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(finding.Severity)) {
         throw new Error("Missing/invalid finding severity");
       }
-      if (["UNKNOWN", "HIGH", "CRITICAL"].includes(finding.Severity)) {
+      if (["UNKNOWN", "HIGH", "CRITICAL"].includes(finding.Severity) && !isInherited(finding, result)) {
         throw new Error(`Unapproved ${kind} finding: ${finding.VulnerabilityID ?? finding.ID}`);
       }
     }
@@ -149,6 +158,33 @@ function checkWorkflowScopes(root) {
   }
 }
 
+/** Gitleaks exits 1 on findings; any other status, or a mismatched report, is a failed scan. */
+function checkScannerStatus(report, rawStatus) {
+  if (!["0", "1"].includes(rawStatus)) throw new Error("Invalid scanner result");
+  if (requireArray(report, "Gitleaks findings").length > 0 !== (rawStatus === "1")) {
+    throw new Error("Scanner/report status mismatch");
+  }
+}
+
+/**
+ * Gitleaks honours config, ignore files and inline allow markers from the scanned tree, so a
+ * PR could otherwise silence a new secret without touching the approved inventory.
+ */
+function checkNoScannerSuppression(root) {
+  // Built at runtime so this gate's own source does not contain the marker it rejects.
+  const allowMarker = ["gitleaks", "allow"].join(":");
+  for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+    // Names are checked before type: Gitleaks follows a symlinked config file.
+    if ([".gitleaks.toml", ".gitleaksignore"].includes(entry.name)) {
+      throw new Error("Scanner configuration in the scanned tree");
+    }
+    if (!entry.isFile()) continue;
+    if (readFileSync(join(entry.parentPath, entry.name)).includes(allowMarker)) {
+      throw new Error("Inline scanner suppression in the scanned tree");
+    }
+  }
+}
+
 /** Pin executable inputs so a passing review cannot silently select different upstream code. */
 function checkPins(dockerfile, workflow) {
   const stages = new Set();
@@ -211,20 +247,47 @@ function checkPins(dockerfile, workflow) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [kind, file] = process.argv.slice(2);
+  const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
   if (kind === "pins") {
     checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(file, "utf8"));
-  } else if (kind === "gitleaks") {
-    const result = evaluateGitleaks(
-      JSON.parse(readFileSync(file, "utf8")),
-      Number(process.argv[4]),
-      process.argv[5]
+  } else if (kind === "generate-baseline") {
+    const [gitleaks, codeql, dependencies, image, metadata] = process.argv.slice(3, 8).map(readJson);
+    const reports = { gitleaks, codeql, dependencies, image };
+    const baseline = generateBaseline(reports, metadata, checkReport, process.argv[8]);
+    process.stdout.write(`${JSON.stringify(baseline, null, 2)}\n`);
+    process.exit(0);
+  } else if (["gitleaks", "codeql", "dependencies", "image"].includes(kind)) {
+    const report = readJson(file);
+    const sourceRoot = process.argv[5];
+    if (kind === "gitleaks") {
+      checkScannerStatus(report, process.argv[4]);
+      checkNoScannerSuppression(sourceRoot);
+    }
+    // A green source-merge check is not publication eligibility; the SLE-119 publish job must
+    // re-run the strict gate, and this evidence records its verdict for every run.
+    let publication = { kind, eligible: true };
+    try {
+      if (kind === "gitleaks") {
+        // Publication honours only the 167 exact-source non-credential dispositions Sierra approved.
+        const secrets = evaluateGitleaks(report, Number(process.argv[4]), sourceRoot);
+        console.log(JSON.stringify(secrets));
+        if (secrets.blocking) throw new Error(`${secrets.blocking} undispositioned Gitleaks findings`);
+      } else {
+        checkReport(kind, report);
+      }
+    } catch (error) {
+      publication = { kind, eligible: false, reason: error.message };
+    }
+    writeFileSync(
+      join(dirname(file), `publication-verdict-${kind}.json`),
+      `${JSON.stringify(publication)}\n`
     );
-    console.log(JSON.stringify(result));
-    if (result.blocking) throw new Error("Undispositioned Gitleaks findings block eligibility");
+    console.log(`${kind} publication: ${publication.eligible ? "PASS" : `BLOCKED (${publication.reason})`}`);
+    checkReport(kind, report, createInheritedCheck(kind, loadBaseline(), { sourceRoot, report }));
   } else {
-    checkReport(kind, JSON.parse(readFileSync(file, "utf8")));
+    checkReport(kind, readJson(file));
   }
   console.log(`${kind}: PASS`);
 }
 
-export { checkPins, checkReport };
+export { checkNoScannerSuppression, checkPins, checkReport, checkScannerStatus };
