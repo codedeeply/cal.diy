@@ -45,7 +45,8 @@ Two verdicts are computed from the same validated reports (SLE-123):
   baseline. In-tree Gitleaks config, ignore files and inline allow markers
   are rejected so a PR cannot silence the scanner instead.
 - **Publication** stays strict: raw high, critical and unknown image/dependency
-  findings, CodeQL scores >=7 and any Gitleaks finding block. Every run records
+  findings, CodeQL scores >=7 and any Gitleaks finding outside the 167 approved
+  non-credential dispositions block. Every run records
   `publication-verdict-<kind>.json` in its evidence artifact and prints
   `<kind> publication: BLOCKED (...)`. A green Foundation CI is **not**
   publication eligibility; the SLE-119 publish job must re-run the strict gate
@@ -57,6 +58,35 @@ enforced by review only, because checks run the PR's own gate code; SLE-127
 tracks making it tamper-resistant. Lowering the inventory after a remediation
 (ratchet down) is the only routine edit; regenerate it with
 `node scripts/foundation-gates.mjs generate-baseline <reports...> <metadata> <source-tree>`.
+
+### Sierra-approved exact-source non-credentials
+
+Approval: https://linear.app/sam-thacker-studios/issue/SLE-119#comment-25139d3e-d446-4eae-922b-207f3da8d002
+
+The 167-row `noncredential-dispositions.tsv` is a deterministic projection of the
+published proposal SHA256 `b5688e00b1956bc0f32f37a2bcdd605e157dff41459c3c543cf0c65ae0fed190`.
+One row binds rule, full location, source-file SHA256 and proof classification/key/revision.
+Proofs: 162 current and two historical translation checksums, two UI labels and
+one non-parseable literal mock key. Full proof metadata remains on the approved
+Linear attachment; no credential values are included. `noncredential-approval.json`
+binds its exact inventory hash to Sierra, SLE-119 and expiry **2026-10-20 00:00 UTC**.
+The evaluator pins that approval's bytes; changing proof data, scope or expiry
+requires a new explicit Sierra decision and reviewed policy update, not an LLM waiver.
+
+The pinned scanner still scans the whole tracked archive without exclusions.
+Its finding exit status 1 is captured so the evaluator can run; other failures,
+missing/malformed evidence and inconsistent status/report pairs fail closed.
+Matching uses bytes from that same scanned archive, rejects symlinked source,
+and consumes each exact finding identity only once. Changed source invalidates
+its proof; missing/changed approval, inventory or expired policy fails closed.
+Counts distinguish `total`, `dispositioned` and `blocking`; raw redacted reports
+are retained unchanged. The recorded 206-finding report yields 167 dispositions
+and **39 blockers**, not a passing gate. New and unmatched findings always block.
+
+Reproduce: `node --test scripts/foundation-secret-dispositions.test.mjs`.
+For a real pinned-scanner report: `node scripts/foundation-gates.mjs gitleaks REPORT SCANNER_EXIT SCANNED_ROOT`.
+This does not resolve independent CI trust, vulnerabilities, CodeQL, signing or
+recovery. All existing draft/merge/production boundaries remain in force.
 
 Negative fixtures prove report rejection, including deliberately unsafe image,
 action, secret, vulnerability and CodeQL inputs. They do not substitute for real
