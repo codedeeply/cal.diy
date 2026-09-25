@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { createInheritedCheck, generateBaseline, loadBaseline } from "./foundation-baseline.mjs";
@@ -52,7 +53,7 @@ function checkReport(kind, report, isInherited = () => false) {
         const score = Number(rawScore);
         if (!Number.isFinite(score) || score < 0) throw new Error("Invalid CodeQL severity");
         if ((score >= 7 || finding.level === "error") && !isInherited(finding, run)) {
-          throw new Error(`Unapproved CodeQL finding: ${finding.ruleId}`);
+          throw new Error(`Unapproved CodeQL finding: ${ruleId}`);
         }
       }
     }
@@ -91,10 +92,25 @@ function checkReport(kind, report, isInherited = () => false) {
 
 /** Gitleaks exits 1 on findings; any other status, or a mismatched report, is a failed scan. */
 function checkScannerStatus(report, rawStatus) {
-  const status = Number(rawStatus);
-  if (![0, 1].includes(status)) throw new Error("Invalid scanner result");
-  if (requireArray(report, "Gitleaks findings").length > 0 !== (status === 1)) {
+  if (!["0", "1"].includes(rawStatus)) throw new Error("Invalid scanner result");
+  if (requireArray(report, "Gitleaks findings").length > 0 !== (rawStatus === "1")) {
     throw new Error("Scanner/report status mismatch");
+  }
+}
+
+/**
+ * Gitleaks honours config, ignore files and inline allow markers from the scanned tree, so a
+ * PR could otherwise silence a new secret without touching the approved inventory.
+ */
+function checkNoScannerSuppression(root) {
+  for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    if ([".gitleaks.toml", ".gitleaksignore"].includes(entry.name)) {
+      throw new Error("Scanner configuration in the scanned tree");
+    }
+    if (readFileSync(join(entry.parentPath, entry.name)).includes("gitleaks:allow")) {
+      throw new Error("Inline scanner suppression in the scanned tree");
+    }
   }
 }
 
@@ -131,26 +147,36 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (kind === "pins") {
     checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(file, "utf8"));
   } else if (kind === "generate-baseline") {
-    const [gitleaks, codeql, dependencies, image, metadata] = process.argv.slice(3).map(readJson);
+    const [gitleaks, codeql, dependencies, image, metadata] = process.argv.slice(3, 8).map(readJson);
     const reports = { gitleaks, codeql, dependencies, image };
-    process.stdout.write(`${JSON.stringify(generateBaseline(reports, metadata, checkReport), null, 1)}\n`);
+    const baseline = generateBaseline(reports, metadata, checkReport, process.argv[8]);
+    process.stdout.write(`${JSON.stringify(baseline, null, 1)}\n`);
     process.exit(0);
   } else if (["gitleaks", "codeql", "dependencies", "image"].includes(kind)) {
     const report = readJson(file);
-    if (kind === "gitleaks") checkScannerStatus(report, process.argv[4]);
-    // The strict verdict stays visible until the SLE-119 publish job enforces it.
-    let publication = "PASS";
+    const sourceRoot = process.argv[5];
+    if (kind === "gitleaks") {
+      checkScannerStatus(report, process.argv[4]);
+      checkNoScannerSuppression(sourceRoot);
+    }
+    // A green source-merge check is not publication eligibility; the SLE-119 publish job must
+    // re-run the strict gate, and this evidence records its verdict for every run.
+    let publication = { kind, eligible: true };
     try {
       checkReport(kind, report);
     } catch (error) {
-      publication = `BLOCKED (${error.message})`;
+      publication = { kind, eligible: false, reason: error.message };
     }
-    console.log(`${kind} publication: ${publication}`);
-    checkReport(kind, report, createInheritedCheck(kind, loadBaseline()));
+    writeFileSync(
+      join(dirname(file), `publication-verdict-${kind}.json`),
+      `${JSON.stringify(publication)}\n`
+    );
+    console.log(`${kind} publication: ${publication.eligible ? "PASS" : `BLOCKED (${publication.reason})`}`);
+    checkReport(kind, report, createInheritedCheck(kind, loadBaseline(), sourceRoot));
   } else {
     checkReport(kind, readJson(file));
   }
   console.log(`${kind}: PASS`);
 }
 
-export { checkPins, checkReport };
+export { checkNoScannerSuppression, checkPins, checkReport, checkScannerStatus };

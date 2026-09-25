@@ -32,19 +32,26 @@ Two verdicts are computed from the same validated reports (SLE-123):
   `inherited-baseline.json`, the inventory Sierra approved in the
   [SLE-116 v0.1.1 addendum](https://linear.app/sam-thacker-studios/issue/SLE-116#comment-773bac72-ec5e-4f2a-bcc0-02d90e8ed1f7).
   It was generated from full scans of `main` `0c80ce1` and is pinned by SHA-256 in
-  `scripts/foundation-baseline.mjs`. Secret and CodeQL identities are
-  `(file, rule)` counts, so an extra instance of an inherited finding still blocks.
-  A Trivy finding is inherited when the baseline had that advisory for the package,
-  or when that exact package version was already shipped at baseline.
+  `scripts/foundation-baseline.mjs`. Secret identities are `(file, rule, hash of
+  the flagged lines)` and CodeQL identities `(rule, file)`, each counted, so a
+  moved finding stays inherited while a replaced value or an extra instance
+  blocks. A Trivy finding is inherited when the baseline had that advisory for
+  the package, or when that exact package version was already shipped at
+  baseline. In-tree Gitleaks config, ignore files and `gitleaks:allow` markers
+  are rejected so a PR cannot silence the scanner instead.
 - **Publication** stays strict: raw high, critical and unknown image/dependency
-  findings, CodeQL scores >=7 and any undispositioned Gitleaks finding block.
-  The verdict is printed as `<kind> publication: BLOCKED (...)` on every run; the
-  SLE-119 publish job must enforce it before any artifact is signed.
+  findings, CodeQL scores >=7 and any Gitleaks finding block. Every run records
+  `publication-verdict-<kind>.json` in its evidence artifact and prints
+  `<kind> publication: BLOCKED (...)`. A green Foundation CI is **not**
+  publication eligibility; the SLE-119 publish job must re-run the strict gate
+  before anything is signed.
 
 Malformed reports, missing scan coverage and configuration findings fail both.
-Changing the inventory or its hash is a Sierra A2 policy decision. Lowering it
-after a remediation (ratchet down) is the only routine edit; regenerate it with
-`node scripts/foundation-gates.mjs generate-baseline` from raw evidence.
+Changing the inventory or its hash is a Sierra A2 policy decision. Today that is
+enforced by review only, because checks run the PR's own gate code; SLE-127
+tracks making it tamper-resistant. Lowering the inventory after a remediation
+(ratchet down) is the only routine edit; regenerate it with
+`node scripts/foundation-gates.mjs generate-baseline <reports...> <metadata> <source-tree>`.
 
 Negative fixtures prove report rejection, including deliberately unsafe image,
 action, secret, vulnerability and CodeQL inputs. They do not substitute for real
