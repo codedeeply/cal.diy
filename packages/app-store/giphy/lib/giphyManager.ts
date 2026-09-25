@@ -1,5 +1,4 @@
 import { HttpError } from "@calcom/lib/http-error";
-
 import getAppKeysFromSlug from "../../_utils/getAppKeysFromSlug";
 
 const checkGiphyApiKey = async () => {
@@ -7,6 +6,10 @@ const checkGiphyApiKey = async () => {
   if (typeof appKeys.api_key === "string") return appKeys.api_key;
   throw new HttpError({ statusCode: 400, message: "Missing Giphy api_key" });
 };
+
+// Giphy IDs are URL-safe slugs; rejecting anything else keeps a crafted ID from rewriting the
+// request path that carries our API key.
+const giphyIdRegexp = /^[a-zA-Z0-9_-]+$/;
 
 export const searchGiphy = async (locale: string, keyword: string, offset = 0) => {
   const apiKey = await checkGiphyApiKey();
@@ -34,16 +37,22 @@ export const searchGiphy = async (locale: string, keyword: string, offset = 0) =
 };
 
 export const getGiphyById = async (giphyId: string) => {
+  if (!giphyIdRegexp.test(giphyId)) {
+    throw new HttpError({ statusCode: 400, message: "Giphy ID is invalid" });
+  }
   const apiKey = await checkGiphyApiKey();
   const queryParams = new URLSearchParams({
     api_key: apiKey,
   });
-  const response = await fetch(`https://api.giphy.com/v1/gifs/${giphyId}?${queryParams.toString()}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
-  });
+  const response = await fetch(
+    `https://api.giphy.com/v1/gifs/${encodeURIComponent(giphyId)}?${queryParams.toString()}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    }
+  );
   const responseBody = await response.json();
   const gifs = responseBody.data;
   return gifs?.images?.fixed_height_downsampled?.url || null;
