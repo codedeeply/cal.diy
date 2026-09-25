@@ -389,6 +389,74 @@ test("workflow scope policy decodes quoted and escaped permission and condition 
   assert.throws(() => checkPins(pinnedBase, `${valid}\n"i\\u0066": false\n`));
 });
 
+test("unfiltered pull requests cover main and future stack bases on default opened/synchronize/reopened events", () => {
+  const workflow = parse(checkedWorkflow);
+  assert.deepEqual(Object.keys(workflow.on).sort(), ["pull_request", "push", "workflow_dispatch"].sort());
+  assert.equal(workflow.on.pull_request, null);
+  assert.deepEqual(workflow.on.push.branches, ["main"]);
+  checkPins(pinnedBase, checkedWorkflow);
+
+  workflow.on.pull_request = {};
+  checkPins(pinnedBase, stringify(workflow));
+  checkPins(pinnedBase, checkedWorkflow.replace("on:", '"o\\u006e":'));
+});
+
+const setEvent = (name, value) => (workflow) => {
+  workflow.on[name] = value;
+};
+const removeEvent = (name) => (workflow) => {
+  delete workflow.on[name];
+};
+const eventCases = [
+  [
+    "missing on",
+    (w) => {
+      delete w.on;
+    },
+  ],
+  [
+    "scalar on",
+    (w) => {
+      w.on = "pull_request";
+    },
+  ],
+  [
+    "sequence on",
+    (w) => {
+      w.on = ["pull_request", "push", "workflow_dispatch"];
+    },
+  ],
+  ["missing pull_request", removeEvent("pull_request")],
+  ["false pull_request", setEvent("pull_request", false)],
+  ["sequence pull_request", setEvent("pull_request", ["opened"])],
+  ["pull_request branch filter", setEvent("pull_request", { branches: ["main"] })],
+  ["pull_request branch exclusion", setEvent("pull_request", { "branches-ignore": ["feature/**"] })],
+  ["pull_request path filter", setEvent("pull_request", { paths: ["scripts/**"] })],
+  ["pull_request path exclusion", setEvent("pull_request", { "paths-ignore": ["docs/**"] })],
+  ["pull_request missing default activity", setEvent("pull_request", { types: ["opened"] })],
+  [
+    "pull_request extra activity",
+    setEvent("pull_request", { types: ["opened", "synchronize", "reopened", "closed"] }),
+  ],
+  ["missing push", removeEvent("push")],
+  ["unfiltered push", setEvent("push", null)],
+  ["push other branch", setEvent("push", { branches: ["main", "development"] })],
+  ["push path filter", setEvent("push", { branches: ["main"], paths: ["scripts/**"] })],
+  ["missing workflow_dispatch", removeEvent("workflow_dispatch")],
+  ["malformed workflow_dispatch", setEvent("workflow_dispatch", false)],
+  ["unsupported schedule", setEvent("schedule", [{ cron: "0 0 * * *" }])],
+  ["unsupported workflow_run", setEvent("workflow_run", { workflows: ["other"], types: ["completed"] })],
+  ["privileged pull_request_target", setEvent("pull_request_target", null)],
+];
+for (const [name, mutate] of eventCases) {
+  test(`event contract rejects ${name}`, () => {
+    const workflow = parse(checkedWorkflow);
+    workflow.on.pull_request = null;
+    mutate(workflow);
+    assert.throws(() => checkPins(pinnedBase, stringify(workflow)));
+  });
+}
+
 test("local validation alone cannot authenticate its own invocation or implementation", () => {
   // This passing tamper case must remain documented as an external-enforcement blocker.
   const removed = checkedWorkflow.replace(

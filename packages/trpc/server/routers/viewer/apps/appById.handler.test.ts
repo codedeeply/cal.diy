@@ -44,7 +44,7 @@ describe("appByIdHandler", () => {
   });
 
   it("should not expose key field for globally installed apps", async () => {
-    const secretApiKey = "secret-daily-api-key-12345";
+    const secretApiKey = "fixture value that must not be returned";
     const mockCredential: CredentialDataWithTeamName = {
       id: 0,
       type: "daily_video",
