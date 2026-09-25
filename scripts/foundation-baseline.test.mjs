@@ -38,9 +38,10 @@ const sarif = (results, score = "8.1") => ({
     },
   ],
 });
-const codeql = (ruleId, uri, startLine = 1) => ({
+const codeql = (ruleId, uri, startLine = 1, lineHash = `${ruleId}@${uri}:1`) => ({
   ruleId,
   locations: [{ physicalLocation: { artifactLocation: { uri }, region: { startLine } } }],
+  partialFingerprints: { primaryLocationLineHash: lineHash },
 });
 const osPackages = [
   { Name: "libc6", Version: "2.41", Release: "12+deb13u4" },
@@ -85,11 +86,12 @@ const baseline = generateBaseline(
   baseRoot
 );
 const sourceMerge = (kind, report, root = baseRoot) =>
-  checkReport(kind, report, createInheritedCheck(kind, baseline, { sourceRoot: root, report }));
+  checkReport(kind, report, createInheritedCheck(kind, baseline, { sourceRoot: root }));
 
 test("the inventory contains exactly what the strict gate blocks", () => {
   assert.equal(baseline.gitleaks.findings.length, 3);
-  assert.deepEqual(baseline.codeql.findings, [JSON.stringify(["js/risk", "apps/web/lib/url.ts"])]);
+  const codeqlIdentity = ["js/risk", "apps/web/lib/url.ts", "js/risk@apps/web/lib/url.ts:1"];
+  assert.deepEqual(baseline.codeql.findings, [JSON.stringify(codeqlIdentity)]);
   for (const version of ["2.41-12+deb13u4", "1:2.41.5-0+deb13u1"]) {
     const name = version.startsWith("1:") ? "bsdutils" : "libc6";
     assert.ok(baseline.image.packages.includes(JSON.stringify(["os-pkgs:debian", name, version])));
@@ -138,6 +140,10 @@ test("a new blocking CodeQL rule, file or instance blocks; low scores stay allow
   const twice = sarif([codeql("js/risk", "apps/web/lib/url.ts"), codeql("js/risk", "apps/web/lib/url.ts")]);
   assert.throws(() => sourceMerge("codeql", twice), /js\/risk/);
   assert.doesNotThrow(() => sourceMerge("codeql", sarif([codeql("js/minor", "apps/web/lib/anywhere.ts")])));
+  const replaced = sarif([codeql("js/risk", "apps/web/lib/url.ts", 40, "different-line:1")]);
+  assert.throws(() => sourceMerge("codeql", replaced), /js\/risk/);
+  const unfingerprinted = { ...codeql("js/risk", "apps/web/lib/url.ts"), partialFingerprints: {} };
+  assert.throws(() => sourceMerge("codeql", sarif([unfingerprinted])), /fingerprint/);
   const invalidScore = sarif([codeql("js/risk", "apps/web/lib/url.ts")], "NaN");
   assert.throws(() => checkReport("codeql", invalidScore, () => true), /Invalid CodeQL severity/);
 });
@@ -156,6 +162,9 @@ test("an added vulnerable copy cannot borrow a shipped version's advisory, in an
     assert.throws(() => sourceMerge("dependencies", dependencies(order, packages)), /CVE-OLD-1/);
   }
   assert.doesNotThrow(() => sourceMerge("dependencies", dependencies([shipped], packages)));
+  // A second installed copy of a shipped version still counts against the inventory.
+  const shippedTwice = dependencies([shipped, shipped], [{ Name: "axios", Version: "1.12.0" }]);
+  assert.throws(() => sourceMerge("dependencies", shippedTwice), /CVE-OLD-1/);
 });
 
 test("a new vulnerable package version blocks; an advisory on a shipped version does not", () => {
