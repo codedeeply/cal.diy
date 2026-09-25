@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { createInheritedCheck, generateBaseline, loadBaseline } from "./foundation-baseline.mjs";
+import { evaluatePublication, renderReleaseNotes } from "./foundation-publication.mjs";
 import { evaluateGitleaks } from "./foundation-secret-dispositions.mjs";
 
 /** Missing or malformed evidence must not turn a security check green. */
@@ -55,7 +56,7 @@ function checkReport(kind, report, isInherited = () => false) {
         if (typeof rawScore !== "string" || !rawScore.trim()) throw new Error("Missing CodeQL severity");
         const score = Number(rawScore);
         if (!Number.isFinite(score) || score < 0) throw new Error("Invalid CodeQL severity");
-        if ((score >= 7 || finding.level === "error") && !isInherited(finding, run)) {
+        if ((score >= 7 || finding.level === "error") && !isInherited(finding, run, score)) {
           throw new Error(`Unapproved CodeQL finding: ${ruleId}`);
         }
       }
@@ -188,6 +189,82 @@ function checkWorkflowScopes(root) {
   }
 }
 
+const toolPins = ["POSTGRES_IMAGE", "TRIVY_IMAGE", "SYFT_IMAGE", "BUILDKIT_IMAGE"];
+
+function imageStepPins(root, jobId) {
+  const steps = requireArray(root.get("jobs")?.get(jobId)?.get("steps"), "image build steps");
+  const step = steps.find(
+    (item) => item instanceof Map && item.get("run") === "bash scripts/foundation-image.sh"
+  );
+  if (!(step?.get("env") instanceof Map)) throw new Error("Missing image build step");
+  return toolPins.map((name) => step.get("env").get(name));
+}
+
+/**
+ * The publish workflow is the only one allowed to write packages and mint OIDC tokens, so it
+ * may run only on manual dispatch, with exactly these grants, and must scan with the same tool
+ * images the required checks use.
+ */
+function checkPublishWorkflow(workflow, ciWorkflow) {
+  const root = parseWorkflow(workflow);
+  checkWorkflowSafety(root);
+  const events = root.get("on");
+  const inputs = events instanceof Map ? events.get("workflow_dispatch")?.get("inputs") : undefined;
+  if (!(events instanceof Map) || events.size !== 1 || !(inputs instanceof Map) || inputs.size !== 1) {
+    throw new Error("Publishing must be a manual dispatch with only a version input");
+  }
+  if (!inputs.has("version")) throw new Error("Publishing requires a version input");
+  const grants = (value) => (value instanceof Map ? JSON.stringify([...value].sort()) : "");
+  const expected = {
+    publish: [
+      ["actions", "read"],
+      ["attestations", "write"],
+      ["contents", "read"],
+      ["id-token", "write"],
+      ["packages", "write"],
+    ],
+    verify: [
+      ["attestations", "read"],
+      ["contents", "read"],
+      ["packages", "read"],
+    ],
+  };
+  if (grants(root.get("permissions")) !== JSON.stringify([["contents", "read"]])) {
+    throw new Error("Unapproved workflow permissions");
+  }
+  const jobs = root.get("jobs");
+  if (!(jobs instanceof Map) || jobs.size !== 2 || Object.keys(expected).some((id) => !jobs.has(id))) {
+    throw new Error("Expected exactly the publish and verify jobs");
+  }
+  const conditions = new Set();
+  for (const [id, job] of jobs) {
+    if (grants(job.get("permissions")) !== JSON.stringify(expected[id])) {
+      throw new Error("Unapproved workflow permissions");
+    }
+    for (const step of requireArray(job.get("steps"), "publish steps")) {
+      if (
+        step instanceof Map &&
+        step.get("uses") === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" &&
+        step.get("if") === "always()"
+      ) {
+        conditions.add(step);
+      }
+    }
+  }
+  const pending = [root];
+  while (pending.length) {
+    const value = pending.pop();
+    if (value instanceof Map) {
+      if (value.has("if") && !conditions.has(value)) throw new Error("Conditional publishing is forbidden");
+      pending.push(...value.values());
+    } else if (Array.isArray(value)) pending.push(...value);
+  }
+  const ciPins = JSON.stringify(imageStepPins(parseWorkflow(ciWorkflow), "artifact"));
+  if (JSON.stringify(imageStepPins(root, "publish")) !== ciPins) {
+    throw new Error("Publish tool images must match the required checks");
+  }
+}
+
 /** Gitleaks exits 1 on findings; any other status, or a mismatched report, is a failed scan. */
 function checkScannerStatus(report, rawStatus) {
   if (!["0", "1"].includes(rawStatus)) throw new Error("Invalid scanner result");
@@ -231,6 +308,13 @@ function checkPins(dockerfile, workflow) {
     }
     if (match[2]) stages.add(match[2]);
   }
+  const root = parseWorkflow(workflow);
+  checkWorkflowSafety(root);
+  checkWorkflowEvents(root);
+  checkWorkflowScopes(root);
+}
+
+function parseWorkflow(workflow) {
   // Report-only jobs must remain usable without installing the workspace dependency graph.
   const { parseDocument } = createRequire(import.meta.url)("yaml");
   const document = parseDocument(workflow, { strict: true, uniqueKeys: true, stringKeys: true });
@@ -239,6 +323,10 @@ function checkPins(dockerfile, workflow) {
   }
   const root = document.toJS({ mapAsMap: true, maxAliasCount: 0 });
   if (!(root instanceof Map) || !root.size) throw new Error("Missing workflow mapping");
+  return root;
+}
+
+function checkWorkflowSafety(root) {
   const pending = [root];
   while (pending.length) {
     const value = pending.pop();
@@ -272,8 +360,26 @@ function checkPins(dockerfile, workflow) {
       }
     }
   }
-  checkWorkflowEvents(root);
-  checkWorkflowScopes(root);
+}
+
+/** Evaluates one report against the SLE-116 D2 publication thresholds. */
+function publicationVerdict(kind, report, gitleaksStatus, sourceRoot, log = () => {}) {
+  try {
+    if (kind !== "gitleaks") return evaluatePublication(kind, report, checkReport);
+    checkScannerStatus(report, gitleaksStatus);
+    checkNoScannerSuppression(sourceRoot);
+    // Publication honours only the 167 exact-source non-credential dispositions Sierra approved.
+    const secrets = evaluateGitleaks(report, Number(gitleaksStatus), sourceRoot);
+    log(JSON.stringify(secrets));
+    return {
+      kind,
+      eligible: secrets.blocking === 0,
+      counts: { dispositioned: secrets.dispositioned },
+      blocking: secrets.blocking ? [`${secrets.blocking} undispositioned Gitleaks findings`] : [],
+    };
+  } catch (error) {
+    return { kind, eligible: false, counts: {}, blocking: [error.message] };
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -281,11 +387,36 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
   if (kind === "pins") {
     checkPins(readFileSync("Dockerfile", "utf8"), readFileSync(file, "utf8"));
+  } else if (kind === "publish-policy") {
+    checkPublishWorkflow(readFileSync(file, "utf8"), readFileSync(process.argv[4], "utf8"));
   } else if (kind === "generate-baseline") {
     const [gitleaks, codeql, dependencies, image, metadata] = process.argv.slice(3, 8).map(readJson);
     const reports = { gitleaks, codeql, dependencies, image };
     const baseline = generateBaseline(reports, metadata, checkReport, process.argv[8]);
     process.stdout.write(`${JSON.stringify(baseline, null, 2)}\n`);
+    process.exit(0);
+  } else if (kind === "publication") {
+    // The publish job's gate: `publication <kind> <report> [gitleaks-status source-root]`.
+    const [reportKind, reportFile, gitleaksStatus, sourceRoot] = process.argv.slice(3);
+    const verdict = publicationVerdict(reportKind, readJson(reportFile), gitleaksStatus, sourceRoot);
+    process.stdout.write(`${JSON.stringify(verdict)}\n`);
+    process.exit(verdict.eligible ? 0 : 1);
+  } else if (kind === "release-notes") {
+    // `release-notes <verdict-dir>`; release identity comes from the publish job environment.
+    const { VERSION, GITHUB_SHA, IMAGE_REPO, DIGEST, CI_RUN, SBOM_SHA256 } = process.env;
+    const kinds = ["gitleaks", "codeql", "dependencies", "image", "config"];
+    const verdicts = kinds.map((reportKind) => readJson(join(file, `${reportKind}.json`)));
+    process.stdout.write(
+      renderReleaseNotes({
+        version: VERSION,
+        sourceSha: GITHUB_SHA,
+        image: IMAGE_REPO,
+        digest: DIGEST,
+        ciRun: CI_RUN,
+        sbomSha256: SBOM_SHA256,
+        verdicts,
+      })
+    );
     process.exit(0);
   } else if (["gitleaks", "codeql", "dependencies", "image"].includes(kind)) {
     const report = readJson(file);
@@ -294,26 +425,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       checkScannerStatus(report, process.argv[4]);
       checkNoScannerSuppression(sourceRoot);
     }
-    // A green source-merge check is not publication eligibility; the SLE-119 publish job must
-    // re-run the strict gate, and this evidence records its verdict for every run.
-    let publication = { kind, eligible: true };
-    try {
-      if (kind === "gitleaks") {
-        // Publication honours only the 167 exact-source non-credential dispositions Sierra approved.
-        const secrets = evaluateGitleaks(report, Number(process.argv[4]), sourceRoot);
-        console.log(JSON.stringify(secrets));
-        if (secrets.blocking) throw new Error(`${secrets.blocking} undispositioned Gitleaks findings`);
-      } else {
-        checkReport(kind, report);
-      }
-    } catch (error) {
-      publication = { kind, eligible: false, reason: error.message };
-    }
+    // A green source-merge check is not publication eligibility; the publish job re-runs the
+    // publication gate, and this evidence records its verdict for every run.
+    const publication = publicationVerdict(kind, report, process.argv[4], sourceRoot, console.log);
     writeFileSync(
       join(dirname(file), `publication-verdict-${kind}.json`),
       `${JSON.stringify(publication)}\n`
     );
-    console.log(`${kind} publication: ${publication.eligible ? "PASS" : `BLOCKED (${publication.reason})`}`);
+    console.log(
+      `${kind} publication: ${publication.eligible ? "PASS" : `BLOCKED (${publication.blocking.join("; ")})`}`
+    );
     checkReport(kind, report, createInheritedCheck(kind, loadBaseline(), { sourceRoot }));
   } else {
     checkReport(kind, readJson(file));
@@ -321,4 +442,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`${kind}: PASS`);
 }
 
-export { checkNoScannerSuppression, checkPins, checkReport, checkScannerStatus };
+export { checkNoScannerSuppression, checkPins, checkPublishWorkflow, checkReport, checkScannerStatus };

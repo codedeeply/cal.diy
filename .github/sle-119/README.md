@@ -44,13 +44,31 @@ Two verdicts are computed from the same validated reports (SLE-123):
   advisory)`, counted across every installed version; an advisory absent from the
   inventory is inherited only on a package version already shipped at baseline. In-tree Gitleaks config, ignore files and inline allow markers
   are rejected so a PR cannot silence the scanner instead.
-- **Publication** stays strict: raw high, critical and unknown image/dependency
-  findings, CodeQL scores >=7 and any Gitleaks finding outside the 167 approved
-  non-credential dispositions block. Every run records
-  `publication-verdict-<kind>.json` in its evidence artifact and prints
-  `<kind> publication: BLOCKED (...)`. A green Foundation CI is **not**
-  publication eligibility; the SLE-119 publish job must re-run the strict gate
-  before anything is signed.
+- **Publication** applies the SLE-116 D2 thresholds Sierra confirmed on
+  2026-09-25 ("policy as written"): a CRITICAL image or dependency finding
+  (fixable, or unfixable without an approval; none exist yet), a CodeQL score
+  of 9.0 or more, and any Gitleaks finding outside the 167 approved
+  non-credential dispositions block. HIGH, MEDIUM and UNKNOWN findings are
+  published as counted residual risk and burned down in SLE-126. Every CI run
+  records `publication-verdict-<kind>.json` in its evidence artifact and prints
+  `<kind> publication: PASS|BLOCKED (...)`. A green Foundation CI is **not**
+  a release: only the publish workflow below pushes an image.
+
+### Publish workflow
+
+`foundation-publish.yml` runs only on manual dispatch from `main` with a
+version such as `caldiy-2026.10.1-rc.1`. It re-evaluates the raw Gitleaks and
+CodeQL reports from the successful Foundation CI push run for the same commit,
+rebuilds and re-scans the image with the same pinned tools, and pushes to
+`ghcr.io/codedeeply/cal.diy:<version>` only if all five publication verdicts
+pass. Tags are write-once. The digest is signed keyless with cosign, the
+CycloneDX SBOM is attached as a signed attestation, and SLSA provenance is
+recorded with `actions/attest-build-provenance`. A separate read-only job then
+verifies tag, signature, SBOM and provenance from the registry. Release notes
+(source SHA, digest, SBOM hash, residual counts) are the job summary and the
+`foundation-release-*` artifact. `publish-policy` in Foundation quality pins
+this workflow's trigger, grants and scanner images; it is the only workflow
+with `packages: write` and `id-token: write`.
 
 Malformed reports and missing scan coverage fail both. Dockerfile configuration
 findings are never inherited: HIGH, CRITICAL and UNKNOWN ones fail both verdicts.
