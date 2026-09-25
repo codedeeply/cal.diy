@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -190,6 +191,26 @@ function checkWorkflowScopes(root) {
 }
 
 const toolPins = ["POSTGRES_IMAGE", "TRIVY_IMAGE", "SYFT_IMAGE", "BUILDKIT_IMAGE"];
+// Pins every step, order, env, `needs` and concurrency setting: the structural checks below explain
+// the intent, but reordering a push before its gate would otherwise pass them.
+const publishWorkflowHash = "5051093bb652463b82460911d47dc77905aa901e77830f5eea41432034a4a65b";
+
+/** Formatting- and comment-independent form of a parsed workflow, for pinning. */
+function canonicalWorkflow(value) {
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      [...value].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, canonicalWorkflow(v)])
+    );
+  }
+  if (Array.isArray(value)) return value.map(canonicalWorkflow);
+  return value;
+}
+
+function publishWorkflowDigest(root) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalWorkflow(root)))
+    .digest("hex");
+}
 
 function imageStepPins(root, jobId) {
   const steps = requireArray(root.get("jobs")?.get(jobId)?.get("steps"), "image build steps");
@@ -242,6 +263,10 @@ function checkPublishWorkflow(workflow, ciWorkflow) {
       throw new Error("Unapproved workflow permissions");
     }
     for (const step of requireArray(job.get("steps"), "publish steps")) {
+      // Expressions expand inside the shell script itself; inputs must arrive through `env`.
+      if (step instanceof Map && typeof step.get("run") === "string" && step.get("run").includes("${{")) {
+        throw new Error("Expressions in publish run scripts are forbidden");
+      }
       if (
         step instanceof Map &&
         step.get("uses") === "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" &&
@@ -262,6 +287,9 @@ function checkPublishWorkflow(workflow, ciWorkflow) {
   const ciPins = JSON.stringify(imageStepPins(parseWorkflow(ciWorkflow), "artifact"));
   if (JSON.stringify(imageStepPins(root, "publish")) !== ciPins) {
     throw new Error("Publish tool images must match the required checks");
+  }
+  if (publishWorkflowDigest(root) !== publishWorkflowHash) {
+    throw new Error("Publish workflow differs from the reviewed pin; update the pin in the same PR");
   }
 }
 
@@ -442,4 +470,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`${kind}: PASS`);
 }
 
-export { checkNoScannerSuppression, checkPins, checkPublishWorkflow, checkReport, checkScannerStatus };
+export {
+  checkNoScannerSuppression,
+  checkPins,
+  checkPublishWorkflow,
+  parseWorkflow,
+  publishWorkflowDigest,
+  checkReport,
+  checkScannerStatus,
+};

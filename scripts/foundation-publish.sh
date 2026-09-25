@@ -23,13 +23,18 @@ case "${1:-}" in
     }
     echo "https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/$attempt" > "$RELEASE_DIR/ci-run.txt"
     for evidence in secrets codeql; do
-      gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n "foundation-$evidence-$run_id-$attempt" -D "$RELEASE_DIR/ci/$evidence"
+      # "Re-run failed jobs" keeps passing jobs' artifacts under their original attempt number.
+      name=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" --jq \
+        "[.artifacts[] | select(.expired | not) | .name | select(startswith(\"foundation-$evidence-$run_id-\"))]
+          | sort_by(split(\"-\") | last | tonumber) | last")
+      [[ "$name" =~ ^foundation-$evidence-$run_id-[0-9]+$ ]]
+      gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n "$name" -D "$RELEASE_DIR/ci/$evidence"
     done
     scan="${RUNNER_TEMP:?}/publish-scan"
     mkdir -p "$scan"
     git archive "$GITHUB_SHA" | tar -x -C "$scan"
     report="$RELEASE_DIR/ci/secrets/gitleaks.json"
-    status=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).length ? "1" : "0")' "$report")
+    status=$(cat "$RELEASE_DIR/ci/secrets/gitleaks-status")
     gate gitleaks "$report" "$status" "$scan"
     mapfile -d '' sarif < <(find "$RELEASE_DIR/ci/codeql" -name '*.sarif' -print0)
     [[ "${#sarif[@]}" -eq 1 ]]
@@ -42,13 +47,18 @@ case "${1:-}" in
     gate image "$RELEASE_DIR/image/trivy-image.json"
     echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
     # Release tags are write-once, so a re-run can never silently repoint a published version.
-    if docker buildx imagetools inspect "$IMAGE_REPO:$VERSION" > /dev/null 2>&1; then
+    # Only a definite "not found" counts as absent; any other registry error stops the job.
+    if lookup=$(docker buildx imagetools inspect "$IMAGE_REPO:$VERSION" 2>&1); then
       echo "Refusing to replace existing tag $IMAGE_REPO:$VERSION"
       exit 1
     fi
+    grep -qiE 'not found|manifest unknown' <<< "$lookup" || { echo "$lookup"; exit 1; }
     docker tag "$LOCAL_IMAGE" "$IMAGE_REPO:$VERSION"
     docker push "$IMAGE_REPO:$VERSION"
-    digest=$(docker buildx imagetools inspect "$IMAGE_REPO:$VERSION" --format '{{.Manifest.Digest}}')
+    # The digest comes from our own push, not a later registry read someone else could race.
+    repo_digest=$(docker image inspect "$IMAGE_REPO:$VERSION" --format '{{index .RepoDigests 0}}')
+    [[ "$repo_digest" == "$IMAGE_REPO@"* ]]
+    digest=${repo_digest#"$IMAGE_REPO@"}
     [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
     echo "$digest" > "$RELEASE_DIR/digest.txt"
     echo "digest=$digest" >> "$GITHUB_OUTPUT"

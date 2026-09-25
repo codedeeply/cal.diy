@@ -171,6 +171,32 @@ const publishCases = [
       w.env.TOKEN = `\${{ secrets.TOKEN }}`;
     },
   ],
+  [
+    "a push before the source gate",
+    (w) => {
+      const steps = w.jobs.publish.steps;
+      const gate = steps.findIndex((s) => s.run === "bash scripts/foundation-publish.sh gate-source");
+      steps.splice(gate, 1);
+    },
+  ],
+  [
+    "an expression in a run script",
+    (w) => {
+      w.jobs.publish.steps[0].run = `echo \${{ inputs.version }}`;
+    },
+  ],
+  [
+    "verification that no longer waits for the push",
+    (w) => {
+      delete w.jobs.verify.needs;
+    },
+  ],
+  [
+    "an overridden image repository",
+    (w) => {
+      w.jobs.publish.env = { IMAGE_REPO: "ghcr.io/attacker/image" };
+    },
+  ],
 ];
 for (const [name, mutate] of publishCases) {
   test(`publish workflow policy rejects ${name}`, () => {

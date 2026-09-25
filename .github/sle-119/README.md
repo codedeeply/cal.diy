@@ -62,12 +62,14 @@ CodeQL reports from the successful Foundation CI push run for the same commit,
 rebuilds and re-scans the image with the same pinned tools, and pushes to
 `ghcr.io/codedeeply/cal.diy:<version>` only if all five publication verdicts
 pass. Tags are write-once. The digest is signed keyless with cosign, the
-CycloneDX SBOM is attached as a signed attestation, and SLSA provenance is
+CycloneDX SBOM is attached with `actions/attest-sbom`, and SLSA provenance is
 recorded with `actions/attest-build-provenance`. A separate read-only job then
 verifies tag, signature, SBOM and provenance from the registry. Release notes
 (source SHA, digest, SBOM hash, residual counts) are the job summary and the
 `foundation-release-*` artifact. `publish-policy` in Foundation quality pins
-this workflow's trigger, grants and scanner images; it is the only workflow
+this workflow's trigger, grants, scanner images and a SHA-256 of its parsed
+content (so any step change also edits the gate code), and rejects `${{ }}`
+inside its `run` scripts; it is the only workflow
 with `packages: write` and `id-token: write`.
 
 Malformed reports and missing scan coverage fail both. Dockerfile configuration

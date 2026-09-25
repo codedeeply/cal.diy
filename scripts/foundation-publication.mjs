@@ -67,7 +67,7 @@ function renderReleaseNotes({ version, sourceSha, image, digest, ciRun, sbomSha2
 - Source: \`${sourceSha}\`
 - Image: \`${image}@${digest}\`
 - Foundation CI evidence: ${ciRun}
-- CycloneDX SBOM SHA-256: \`${sbomSha256}\` (also attached to the image as a signed attestation)
+- CycloneDX SBOM SHA-256: \`${sbomSha256}\` (attached to the image as a GitHub SBOM attestation)
 - Signature and SLSA provenance: keyless Sigstore, issued to \`.github/workflows/foundation-publish.yml\` on \`refs/heads/main\`
 
 ## Publication gate (SLE-116 D2)
@@ -87,6 +87,7 @@ cosign verify ${image}@${digest} \\
   --certificate-identity https://github.com/codedeeply/cal.diy/.github/workflows/foundation-publish.yml@refs/heads/main \\
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 gh attestation verify oci://${image}@${digest} --repo codedeeply/cal.diy
+gh attestation verify oci://${image}@${digest} --repo codedeeply/cal.diy --predicate-type https://cyclonedx.org/bom
 \`\`\`
 `;
 }
