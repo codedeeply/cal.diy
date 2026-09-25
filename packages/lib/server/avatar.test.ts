@@ -29,7 +29,7 @@ describe("uploadAvatar", () => {
     vi.clearAllMocks();
     mockConvertSvgToPng.mockImplementation((data: string) => Promise.resolve(`processed_${data}`));
     mockUpsert.mockResolvedValue(undefined);
-    mockUuidv4.mockReturnValue("generated-uuid-1234");
+    mockUuidv4.mockReturnValue("generated-avatar-object");
   });
 
   it("generates new objectKey via uuidv4 when no existing avatar", async () => {
@@ -38,16 +38,16 @@ describe("uploadAvatar", () => {
     const result = await uploadAvatar({ userId: 1, avatar: "image-data" });
 
     expect(mockUuidv4).toHaveBeenCalled();
-    expect(result).toBe("/api/avatar/generated-uuid-1234.png");
+    expect(result).toBe("/api/avatar/generated-avatar-object.png");
   });
 
   it("reuses existing objectKey and does NOT call uuidv4", async () => {
-    mockFindUnique.mockResolvedValue({ objectKey: "existing-key-5678" });
+    mockFindUnique.mockResolvedValue({ objectKey: "saved-avatar-object" });
 
     const result = await uploadAvatar({ userId: 1, avatar: "image-data" });
 
     expect(mockUuidv4).not.toHaveBeenCalled();
-    expect(result).toBe("/api/avatar/existing-key-5678.png");
+    expect(result).toBe("/api/avatar/saved-avatar-object.png");
   });
 
   it("includes objectKey in create clause but NOT in update clause", async () => {
@@ -57,7 +57,7 @@ describe("uploadAvatar", () => {
 
     expect(mockUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ objectKey: "generated-uuid-1234" }),
+        create: expect.objectContaining({ objectKey: "generated-avatar-object" }),
         update: expect.not.objectContaining({ objectKey: expect.anything() }),
       })
     );

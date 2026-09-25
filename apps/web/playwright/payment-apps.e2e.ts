@@ -2,7 +2,11 @@ import prisma from "@calcom/prisma";
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { test } from "./lib/fixtures";
-import { IS_STRIPE_ENABLED, selectFirstAvailableTimeSlotNextMonth, submitAndWaitForResponse } from "./lib/testUtils";
+import {
+  IS_STRIPE_ENABLED,
+  selectFirstAvailableTimeSlotNextMonth,
+  submitAndWaitForResponse,
+} from "./lib/testUtils";
 
 test.describe.configure({ mode: "parallel" });
 test.afterEach(({ users }) => users.deleteAll());
@@ -105,11 +109,11 @@ test.describe("Payment app", () => {
           scope: "read_write",
           livemode: false,
           token_type: "bearer",
-          access_token: "sk_test_randomString",
-          refresh_token: "rt_randomString",
+          access_token: "synthetic-stripe-token",
+          refresh_token: "synthetic-stripe-refresh",
           stripe_user_id: "acct_randomString",
           default_currency: "usd",
-          stripe_publishable_key: "pk_test_randomString",
+          stripe_publishable_key: "synthetic-stripe-publishable",
         },
       },
     });
@@ -304,11 +308,11 @@ test.describe("Payment app", () => {
             scope: "read_write",
             livemode: false,
             token_type: "bearer",
-            access_token: "sk_test_randomString",
-            refresh_token: "rt_randomString",
+            access_token: "synthetic-stripe-token",
+            refresh_token: "synthetic-stripe-refresh",
             stripe_user_id: "acct_randomString",
             default_currency: "usd",
-            stripe_publishable_key: "pk_test_randomString",
+            stripe_publishable_key: "synthetic-stripe-publishable",
           },
         },
       ],
@@ -355,11 +359,11 @@ test.describe("Payment app", () => {
             scope: "read_write",
             livemode: false,
             token_type: "bearer",
-            access_token: "sk_test_randomString",
-            refresh_token: "rt_randomString",
+            access_token: "synthetic-stripe-token",
+            refresh_token: "synthetic-stripe-refresh",
             stripe_user_id: "acct_randomString",
             default_currency: "usd",
-            stripe_publishable_key: "pk_test_randomString",
+            stripe_publishable_key: "synthetic-stripe-publishable",
           },
         },
       ],
