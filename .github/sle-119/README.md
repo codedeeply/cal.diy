@@ -48,8 +48,10 @@ Two verdicts are computed from the same validated reports (SLE-123):
   2026-09-25 ("policy as written"): a CRITICAL image or dependency finding
   (fixable, or unfixable without an approval; none exist yet), a CodeQL score
   of 9.0 or more, and any Gitleaks finding outside the 167 approved
-  non-credential dispositions block. HIGH, MEDIUM and UNKNOWN findings are
-  published as counted residual risk and burned down in SLE-126. Every CI run
+  non-credential dispositions block. HIGH and UNKNOWN Trivy findings and
+  CodeQL scores of 7.0 to 8.9 are published as counted residual risk; MEDIUM
+  and LOW findings neither block nor appear in the counts. Burn-down is
+  SLE-126. Every CI run
   records `publication-verdict-<kind>.json` in its evidence artifact and prints
   `<kind> publication: PASS|BLOCKED (...)`. A green Foundation CI is **not**
   a release: only the publish workflow below pushes an image.
