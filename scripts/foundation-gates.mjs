@@ -103,12 +103,15 @@ function checkScannerStatus(report, rawStatus) {
  * PR could otherwise silence a new secret without touching the approved inventory.
  */
 function checkNoScannerSuppression(root) {
+  // Built at runtime so this gate's own source does not contain the marker it rejects.
+  const allowMarker = ["gitleaks", "allow"].join(":");
   for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue;
+    // Names are checked before type: Gitleaks follows a symlinked config file.
     if ([".gitleaks.toml", ".gitleaksignore"].includes(entry.name)) {
       throw new Error("Scanner configuration in the scanned tree");
     }
-    if (readFileSync(join(entry.parentPath, entry.name)).includes("gitleaks:allow")) {
+    if (!entry.isFile()) continue;
+    if (readFileSync(join(entry.parentPath, entry.name)).includes(allowMarker)) {
       throw new Error("Inline scanner suppression in the scanned tree");
     }
   }
@@ -172,7 +175,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       `${JSON.stringify(publication)}\n`
     );
     console.log(`${kind} publication: ${publication.eligible ? "PASS" : `BLOCKED (${publication.reason})`}`);
-    checkReport(kind, report, createInheritedCheck(kind, loadBaseline(), sourceRoot));
+    checkReport(kind, report, createInheritedCheck(kind, loadBaseline(), { sourceRoot, report }));
   } else {
     checkReport(kind, readJson(file));
   }

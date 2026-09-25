@@ -9,6 +9,11 @@ const kinds = ["gitleaks", "codeql", "dependencies", "image"];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const key = (...parts) => JSON.stringify(parts);
 
+function requireArray(value, label) {
+  if (!Array.isArray(value)) throw new Error(`Missing/invalid ${label}`);
+  return value;
+}
+
 function requireString(value, label) {
   if (typeof value !== "string" || !value) throw new Error(`Missing/invalid ${label}`);
   return value;
@@ -100,30 +105,37 @@ function sourceReader(sourceRoot) {
   };
 }
 
-function createInheritedCheck(kind, baseline, sourceRoot) {
+function createInheritedCheck(kind, baseline, { sourceRoot, report } = {}) {
   if (!kinds.includes(kind)) throw new Error(`No inherited inventory for ${kind}`);
   const remaining = new Map();
   for (const identity of baseline[kind].findings) remaining.set(identity, (remaining.get(identity) ?? 0) + 1);
-  const shippedPackages = new Set(baseline[kind].packages ?? []);
-  const readLines = sourceReader(sourceRoot);
-  return (finding, context) => {
-    if (kind === "dependencies" || kind === "image") {
-      const version = requireString(finding?.InstalledVersion, "installed version");
-      // Checked before counts so a shipped version never consumes an allowance another
-      // (new) version of the same package would otherwise borrow; result is order-independent.
-      if (
-        shippedPackages.has(
-          key(scopeOf(context), requireString(finding.PkgName, "vulnerable package"), version)
-        )
-      ) {
-        return true;
-      }
-    }
-    const identity = identityOf(kind, finding, { ...context, readLines });
+  const consume = (identity) => {
     if (!(remaining.get(identity) > 0)) return false;
     remaining.set(identity, remaining.get(identity) - 1);
     return true;
   };
+  const readLines = sourceReader(sourceRoot);
+  if (kind === "codeql" || kind === "gitleaks") {
+    return (finding, context) => consume(identityOf(kind, finding, { ...context, readLines }));
+  }
+  const shippedPackages = new Set(baseline[kind].packages ?? []);
+  const isShipped = (finding, result) =>
+    shippedPackages.has(
+      key(
+        scopeOf(result),
+        requireString(finding?.PkgName, "vulnerable package"),
+        requireString(finding.InstalledVersion, "installed version")
+      )
+    );
+  // Shipped versions claim their inherited advisories first, over the whole report, so only
+  // allowances left over can cover a new version. An upgrade that replaces a shipped version
+  // may keep an inherited advisory, but an added copy alongside it cannot, in any order.
+  for (const result of requireArray(report?.Results, "Trivy results")) {
+    for (const finding of result.Vulnerabilities ?? []) {
+      if (isShipped(finding, result)) consume(identityOf(kind, finding, result));
+    }
+  }
+  return (finding, result) => isShipped(finding, result) || consume(identityOf(kind, finding, result));
 }
 
 /**

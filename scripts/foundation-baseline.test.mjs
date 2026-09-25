@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -84,7 +85,7 @@ const baseline = generateBaseline(
   baseRoot
 );
 const sourceMerge = (kind, report, root = baseRoot) =>
-  checkReport(kind, report, createInheritedCheck(kind, baseline, root));
+  checkReport(kind, report, createInheritedCheck(kind, baseline, { sourceRoot: root, report }));
 
 test("the inventory contains exactly what the strict gate blocks", () => {
   assert.equal(baseline.gitleaks.findings.length, 3);
@@ -141,7 +142,7 @@ test("a new blocking CodeQL rule, file or instance blocks; low scores stay allow
   assert.throws(() => checkReport("codeql", invalidScore, () => true), /Invalid CodeQL severity/);
 });
 
-test("vulnerable versions are judged independently of report order", () => {
+test("an added vulnerable copy cannot borrow a shipped version's advisory, in any order", () => {
   const added = vuln("axios", "0.21.0", "CVE-OLD-1");
   const shipped = vuln("axios", "1.12.0", "CVE-OLD-1");
   const packages = [
@@ -152,15 +153,9 @@ test("vulnerable versions are judged independently of report order", () => {
     [added, shipped],
     [shipped, added],
   ]) {
-    assert.doesNotThrow(() => sourceMerge("dependencies", dependencies(order, packages)));
+    assert.throws(() => sourceMerge("dependencies", dependencies(order, packages)), /CVE-OLD-1/);
   }
-  const newAdvisory = vuln("axios", "0.21.0", "CVE-NEW-2");
-  for (const order of [
-    [newAdvisory, shipped],
-    [shipped, newAdvisory],
-  ]) {
-    assert.throws(() => sourceMerge("dependencies", dependencies(order, packages)), /CVE-NEW-2/);
-  }
+  assert.doesNotThrow(() => sourceMerge("dependencies", dependencies([shipped], packages)));
 });
 
 test("a new vulnerable package version blocks; an advisory on a shipped version does not", () => {
@@ -206,8 +201,12 @@ test("scanner configuration and inline suppressions in the scanned tree are reje
   assert.doesNotThrow(() => checkNoScannerSuppression(baseRoot));
   assert.throws(() => checkNoScannerSuppression(sourceTree({ ".gitleaks.toml": "" })), /configuration/);
   assert.throws(() => checkNoScannerSuppression(sourceTree({ "a/.gitleaksignore": "" })), /configuration/);
-  const inline = sourceTree({ "src/key.ts": 'const key = "x"; // gitleaks:allow\n' });
+  const marker = ["gitleaks", "allow"].join(":");
+  const inline = sourceTree({ "src/key.ts": `const key = "x"; // ${marker}\n` });
   assert.throws(() => checkNoScannerSuppression(inline), /Inline scanner suppression/);
+  const linked = sourceTree({ "docs/rules.toml": "" });
+  symlinkSync(join(linked, "docs/rules.toml"), join(linked, ".gitleaks.toml"));
+  assert.throws(() => checkNoScannerSuppression(linked), /configuration/);
 });
 
 test("the pinned inventory rejects edits, missing files and incomplete sections", () => {
@@ -227,6 +226,12 @@ test("the pinned inventory rejects edits, missing files and incomplete sections"
     () => loadBaseline(root, createHash("sha256").update(incomplete).digest("hex")),
     /Incomplete/
   );
+});
+
+test("the committed tree itself passes the suppression check", () => {
+  const tree = mkdtempSync(join(tmpdir(), "head-"));
+  execSync(`git archive HEAD | tar -x -C "${tree}"`);
+  assert.doesNotThrow(() => checkNoScannerSuppression(tree));
 });
 
 test("the committed inventory matches its pinned hash", () => {

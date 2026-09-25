@@ -37,7 +37,7 @@ Two verdicts are computed from the same validated reports (SLE-123):
   moved finding stays inherited while a replaced value or an extra instance
   blocks. A Trivy finding is inherited when the baseline had that advisory for
   the package, or when that exact package version was already shipped at
-  baseline. In-tree Gitleaks config, ignore files and `gitleaks:allow` markers
+  baseline. In-tree Gitleaks config, ignore files and inline allow markers
   are rejected so a PR cannot silence the scanner instead.
 - **Publication** stays strict: raw high, critical and unknown image/dependency
   findings, CodeQL scores >=7 and any Gitleaks finding block. Every run records
