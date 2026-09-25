@@ -232,7 +232,7 @@ describe("BookingAccessService", () => {
 
         const mockBookingOwner = {
           organizationId: 200,
-          teams: [],
+          teams: [{ teamId: 200 }],
         };
 
         mockBookingRepo.findByUidIncludeEventType.mockResolvedValue(mockBooking);
@@ -262,7 +262,7 @@ describe("BookingAccessService", () => {
 
         const mockBookingOwner = {
           organizationId: 200,
-          teams: [],
+          teams: [{ teamId: 200 }],
         };
 
         mockBookingRepo.findByUidIncludeEventType.mockResolvedValue(mockBooking);
