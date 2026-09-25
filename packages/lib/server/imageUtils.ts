@@ -62,22 +62,19 @@ export async function detectContentType(buffer: Buffer): Promise<string | null> 
   if ([0x3c, 0x73, 0x76, 0x67].every((b, i) => buffer[i] === b)) {
     return SVG;
   }
-  if ([0, 0, 0, 0, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66].every((b, i) => !b || buffer[i] === b)) {
-    return AVIF;
-  }
-
   // Fallback to sharp metadata detection
   try {
     const meta = await sharp(buffer).metadata();
     switch (meta?.format) {
-      case "avif":
+      case "heif": {
+        if (meta.compression !== "av1") return null;
         return AVIF;
+      }
       case "webp":
         return WEBP;
       case "png":
         return PNG;
       case "jpeg":
-      case "jpg":
         return JPEG;
       case "gif":
         return GIF;
