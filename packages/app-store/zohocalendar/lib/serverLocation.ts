@@ -12,7 +12,13 @@ const zohoDomainByLocation = new Map<string, string>([
   ["uk", "uk"],
 ]);
 
+const knownZohoDomains = new Set(zohoDomainByLocation.values());
+
 export function getZohoServerLocation(location: string | undefined): string | null {
   if (!location) return "com";
   return zohoDomainByLocation.get(location) ?? null;
+}
+
+export function isKnownZohoDomain(domain: string): boolean {
+  return knownZohoDomains.has(domain);
 }
