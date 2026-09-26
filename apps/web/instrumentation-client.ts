@@ -25,6 +25,8 @@ if (process.env.NODE_ENV === "production") {
     // Setting this option to true will print useful information to the console while you're setting up Sentry.
     debug: !!process.env.SENTRY_DEBUG,
     sendDefaultPii: false,
+    // Metrics attach scope user fields and have no scrubbing hook in this configuration.
+    enableMetrics: false,
     beforeSend(event) {
       if (
         event.exception?.values?.some(

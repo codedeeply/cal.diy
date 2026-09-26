@@ -15,6 +15,8 @@ Sentry.init({
   // Setting this option to true will print useful information to the console while you're setting up Sentry.
   debug: !!process.env.SENTRY_DEBUG,
   sendDefaultPii: false,
+  // Metrics attach scope user fields and have no scrubbing hook in this configuration.
+  enableMetrics: false,
   beforeSend(event) {
     event.tags = {
       ...event.tags,

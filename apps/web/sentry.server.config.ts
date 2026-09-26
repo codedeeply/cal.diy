@@ -14,6 +14,8 @@ Sentry.init({
   tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0.0") || 0.0,
   integrations: [Sentry.prismaIntegration(), Sentry.httpIntegration()],
   sendDefaultPii: false,
+  // Metrics attach scope user fields and have no scrubbing hook in this configuration.
+  enableMetrics: false,
   beforeSend(event) {
     event.tags = {
       ...event.tags,

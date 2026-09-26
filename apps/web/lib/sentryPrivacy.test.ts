@@ -132,6 +132,79 @@ describe("scrubEvent", () => {
   });
 });
 
+describe("scrubEvent privacy review regressions", () => {
+  it("scrubs root-span attributes copied into the trace context", () => {
+    const event = scrubEvent({
+      type: "transaction",
+      contexts: {
+        trace: {
+          trace_id: "t",
+          span_id: "s",
+          data: {
+            "http.url": `https://cal.example.invalid/book?email=${prohibited.email}`,
+            "http.target": `/book?name=${prohibited.name}`,
+            "http.client_ip": prohibited.ip,
+            "http.request.header.x_real_ip": prohibited.ip,
+            "http.request.header.referer": `https://cal.example.invalid/x?notes=${prohibited.notes}`,
+            "http.method": "GET",
+          },
+        },
+      },
+    });
+    expectNoProhibitedData(event);
+    expect(event.contexts?.trace?.trace_id).toBe("t");
+    expect(event.contexts?.trace?.data?.["http.target"]).toBe("/book");
+    expect(event.contexts?.trace?.data?.["http.method"]).toBe("GET");
+  });
+
+  it("filters booking values in Prisma object-literal validation errors", () => {
+    const event = scrubEvent({
+      exception: {
+        values: [
+          {
+            type: "PrismaClientValidationError",
+            value: `Invalid prisma.booking.create() invocation: { data: { title: "30 min between Host and ${prohibited.name}", description: "${prohibited.notes}", eventTypeId: 1 } }`,
+          },
+        ],
+      },
+    });
+    expectNoProhibitedData(event);
+    expect(event.exception?.values?.[0].value).toContain("eventTypeId: 1");
+  });
+
+  it("strips query strings from Next.js request paths", () => {
+    const event = scrubEvent({
+      contexts: { nextjs: { request_path: `/team/demo?name=${prohibited.name}`, router_kind: "App Router" } },
+    });
+    expectNoProhibitedData(event);
+    expect(event.contexts?.nextjs).toEqual({ request_path: "/team/demo", router_kind: "App Router" });
+  });
+
+  it("masks URL-encoded email addresses in span descriptions", () => {
+    const encoded = encodeURIComponent(prohibited.email);
+    const event = scrubEvent({
+      type: "transaction",
+      spans: [
+        {
+          span_id: "1",
+          trace_id: "2",
+          start_timestamp: 0,
+          data: {},
+          description: `GET /calendars/${encoded}/events`,
+        },
+      ],
+    });
+    expect(JSON.stringify(event)).not.toContain(encoded);
+  });
+
+  it("scrubs very long messages in bounded time", () => {
+    const started = performance.now();
+    const event = scrubEvent({ message: `${"a".repeat(200_000)} ${prohibited.email}` });
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(event.message?.length).toBeLessThanOrEqual(8193);
+  });
+});
+
 describe("scrubBreadcrumb", () => {
   it("drops console breadcrumbs and scrubs the rest", () => {
     expect(scrubBreadcrumb({ category: "console", message: prohibited.name })).toBeNull();

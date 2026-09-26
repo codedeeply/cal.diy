@@ -42,6 +42,13 @@ const sensitiveKeyWords = new Set([
   "otp",
   "ip",
   "query",
+  "referer",
+  "referrer",
+  "title",
+  "username",
+  "organizer",
+  "rescheduledby",
+  "custominputs",
 ]);
 
 // SDK-populated environment contexts (OS, runtime, browser, trace ids) describe the machine, not
@@ -57,14 +64,21 @@ const sdkContexts = new Set([
   "trace",
 ]);
 const urlKeys = ["url", "http.url", "url.full", "http.target", "to", "from"];
+// Longer strings are truncated before matching so scrubbing cost stays bounded in the browser.
+const maxScrubbedLength = 8192;
 
 const safeHeaders = new Set(["accept", "content-type", "content-length", "host", "user-agent"]);
 
-const emailPattern = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+// Bounded quantifiers keep matching linear; `%40` catches URL-encoded addresses in API paths.
+const emailPattern = /[\w.+-]{1,64}(?:@|%40)[\w-]{1,63}(?:\.[\w-]{1,63})+/g;
 // International or North American formats; ISO dates and ids are deliberately not matched.
 const phonePattern = /\+\d[\d\s().-]{6,}\d|\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g;
-// Serialized objects in log and error messages, e.g. `"email":"x"` or `\"name\":\"x\"`.
-const jsonFieldPattern = /(\\?"([A-Za-z_]+)\\?"\s*:\s*)(\\?")((?:\\\\|\\[^"\\]|[^"\\])*?)\3/g;
+// Serialized fields in log and error messages: JSON (`"email":"x"`, `\"name\":\"x\"`) and the
+// object-literal form Prisma uses in validation errors (`name: "x"`).
+const fieldPatterns = [
+  /(\\?"([A-Za-z_]+)\\?"\s*:\s*)(\\?")((?:\\\\|\\[^"\\]|[^"\\])*?)\3/g,
+  /(\b([A-Za-z_]+)\s*:\s*)(")((?:\\.|[^"\\\n])*?)"/g,
+];
 
 function keyWords(key: string): string[] {
   const words = key
@@ -80,12 +94,13 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function scrubString(value: string): string {
-  return value
-    .replace(jsonFieldPattern, (match, prefix: string, key: string, quote: string) =>
+  let scrubbed = value.length > maxScrubbedLength ? `${value.slice(0, maxScrubbedLength)}…` : value;
+  for (const pattern of fieldPatterns) {
+    scrubbed = scrubbed.replace(pattern, (match, prefix: string, key: string, quote: string) =>
       isSensitiveKey(key) ? `${prefix}${quote}${FILTERED}${quote}` : match
-    )
-    .replace(emailPattern, FILTERED)
-    .replace(phonePattern, FILTERED);
+    );
+  }
+  return scrubbed.replace(emailPattern, FILTERED).replace(phonePattern, FILTERED);
 }
 
 function stripQuery(url: string): string {
@@ -110,9 +125,11 @@ function scrubRecord<T>(value: T): T {
 // Scrubbing only replaces string values with strings, so the input's value types still hold.
 function scrubUrlFields<T extends Record<string, unknown>>(data: T): T {
   const result: Record<string, unknown> = scrubRecord(data);
-  for (const key of urlKeys) {
-    const value = result[key];
-    if (typeof value === "string") result[key] = stripQuery(value);
+  for (const [key, value] of Object.entries(result)) {
+    // Next.js request paths (e.g. `request_path`) include booking-page prefill query strings.
+    if (typeof value === "string" && (urlKeys.includes(key) || /path$/i.test(key))) {
+      result[key] = stripQuery(value);
+    }
   }
   return result as T;
 }
@@ -149,10 +166,13 @@ function scrubEvent<T extends Event>(event: T): T {
     event.contexts = Object.fromEntries(
       Object.entries(event.contexts).map(([name, context]) => [
         name,
-        sdkContexts.has(name) ? context : scrubRecord(context),
+        sdkContexts.has(name) || !context ? context : scrubUrlFields(context),
       ])
     );
   }
+  // The root span's attributes (full URL, client IP, referer) are copied into the trace context.
+  const traceData = event.contexts?.trace?.data;
+  if (traceData && event.contexts?.trace) event.contexts.trace.data = scrubUrlFields(traceData);
   if (event.tags) event.tags = scrubRecord(event.tags);
   if (event.breadcrumbs) {
     event.breadcrumbs = event.breadcrumbs.flatMap((crumb) => {
