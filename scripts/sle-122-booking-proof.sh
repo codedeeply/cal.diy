@@ -14,13 +14,16 @@ for tool in docker git openssl; do command -v "$tool" > /dev/null || { echo "Mis
 docker info > /dev/null || { echo "Docker engine is unavailable"; exit 1; }
 repo=$(git rev-parse --show-toplevel)
 sha=$(git -C "$repo" rev-parse HEAD)
-evidence="${2:-${TMPDIR:-/tmp}/sle-122-proof}/$sha/$label"
-if [[ -e "$evidence" ]]; then echo "Refusing to overwrite evidence: $evidence"; exit 1; fi
-mkdir -p "$evidence"
+evidence_root="${2:-${TMPDIR:-/tmp}/sle-122-proof}"
+mkdir -p "$evidence_root/$sha"
+# Docker needs an absolute bind path, and a plain mkdir is the atomic claim on this run's evidence.
+evidence="$(cd "$evidence_root/$sha" && pwd)/$label"
+mkdir "$evidence" || { echo "Refusing to overwrite evidence: $evidence"; exit 1; }
 exec > >(tee "$evidence/proof.log") 2>&1
 
-task="sle122-$label"
-image="caldiy-sle122:$label"
+# The commit is part of every resource name so runs of different commits cannot remove each other.
+task="sle122-${sha:0:12}-$label"
+image="caldiy-sle122:${sha:0:12}-$label"
 source_dir=$(mktemp -d)
 remove_environment() {
   docker rm -f "$task-web" "$task-db" > /dev/null 2>&1 || true
