@@ -8,6 +8,10 @@ const apiBase = (process.env.SENTRY_API_URL || "https://sentry.io").replace(/\/$
 const environment = process.env.SENTRY_PROOF_ENVIRONMENT;
 const release = process.env.SENTRY_PROOF_RELEASE;
 const label = process.env.SENTRY_PROOF_LABEL;
+// Issues group repeats across runs, so only issues whose latest event is newer than this run count.
+const startedAt = Date.parse(process.env.SENTRY_PROOF_STARTED_AT ?? "");
+if (Number.isNaN(startedAt)) throw new Error("SENTRY_PROOF_STARTED_AT must be an ISO timestamp");
+const deadlineMs = Number(process.env.SENTRY_PROOF_DEADLINE_SECONDS || 120) * 1000;
 const expected = {
   nodejs: "SLE-120 Sentry verification (nodejs)",
   edge: "SLE-120 Sentry verification (edge)",
@@ -28,11 +32,11 @@ async function storedSources() {
     `/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/issues/?query=${query}&environment=${environment}&statsPeriod=24h`
   );
   return Object.keys(expected).filter((source) =>
-    issues.some((issue) => issue.title.includes(expected[source]))
+    issues.some((issue) => issue.title.includes(expected[source]) && Date.parse(issue.lastSeen) >= startedAt)
   );
 }
 
-const deadline = Date.now() + 120_000;
+const deadline = Date.now() + deadlineMs;
 let found = [];
 while (Date.now() < deadline) {
   found = await storedSources();

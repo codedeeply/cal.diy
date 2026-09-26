@@ -42,11 +42,12 @@ remove_environment
 trap cleanup EXIT
 
 git -C "$repo" archive "$sha" | tar -x -C "$source_dir"
+started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 {
   echo "source_sha=$sha"
   echo "sentry_release=$sha"
   echo "sentry_environment=$environment"
-  echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "started_at=$started_at"
   echo "docker=$(docker version --format '{{.Server.Version}} {{.Server.Os}}/{{.Server.Arch}}')"
 } | tee "$evidence/environment.txt"
 
@@ -105,5 +106,6 @@ docker run --rm --network "container:$task-web" -e BASE_URL=http://localhost:300
   --entrypoint node "$task-playwright" sentry-browser-proof.mjs
 # A 500 only proves each route threw; success requires every event to be stored by Sentry.
 SENTRY_PROOF_ENVIRONMENT="$environment" SENTRY_PROOF_RELEASE="$sha" SENTRY_PROOF_LABEL="$label" \
+  SENTRY_PROOF_STARTED_AT="$started_at" \
   node "$source_dir/.github/sle-120/verify-sentry-delivery.mjs" | tee "$evidence/delivery.json"
 echo "SLE-120 Sentry proof $label: PASS (server, edge and browser events stored with release $sha, environment $environment). Evidence: $evidence"
