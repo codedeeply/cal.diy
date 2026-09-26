@@ -17,6 +17,10 @@ ARG CSP_POLICY
 ## We need these variables as required by Next.js build to create rewrites
 ARG NEXT_PUBLIC_SINGLE_ORG_SLUG
 ARG ORGANIZATIONS_ENABLED
+# Browser code has no runtime environment, so its Sentry DSN and release are baked in; both are
+# public identifiers. Empty values leave browser error reporting off.
+ARG NEXT_PUBLIC_SENTRY_DSN_CLIENT=""
+ARG NEXT_PUBLIC_SENTRY_RELEASE=""
 
 ENV NEXT_PUBLIC_WEBAPP_URL=http://NEXT_PUBLIC_WEBAPP_URL_PLACEHOLDER \
   NEXT_PUBLIC_API_V2_URL=$NEXT_PUBLIC_API_V2_URL \
@@ -32,7 +36,9 @@ ENV NEXT_PUBLIC_WEBAPP_URL=http://NEXT_PUBLIC_WEBAPP_URL_PLACEHOLDER \
   ORGANIZATIONS_ENABLED=$ORGANIZATIONS_ENABLED \
   NODE_OPTIONS=--max-old-space-size=${MAX_OLD_SPACE_SIZE} \
   BUILD_STANDALONE=true \
-  CSP_POLICY=$CSP_POLICY
+  CSP_POLICY=$CSP_POLICY \
+  NEXT_PUBLIC_SENTRY_DSN_CLIENT=$NEXT_PUBLIC_SENTRY_DSN_CLIENT \
+  NEXT_PUBLIC_SENTRY_RELEASE=$NEXT_PUBLIC_SENTRY_RELEASE
 
 COPY package.json yarn.lock .yarnrc.yml playwright.config.ts turbo.json i18n.json ./
 COPY .yarn ./.yarn
