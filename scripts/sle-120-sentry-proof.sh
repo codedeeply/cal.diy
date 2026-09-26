@@ -60,7 +60,8 @@ build_args=(--build-arg DATABASE_URL=postgresql://postgres:postgres@localhost:54
   --build-arg NEXTAUTH_SECRET=sle120-disposable-build-only
   --build-arg "CALENDSO_ENCRYPTION_KEY=$(openssl rand -hex 16)"
   --build-arg "NEXT_PUBLIC_SENTRY_DSN_CLIENT=$SENTRY_DSN"
-  --build-arg "NEXT_PUBLIC_SENTRY_RELEASE=$sha")
+  --build-arg "NEXT_PUBLIC_SENTRY_RELEASE=$sha"
+  --build-arg "NEXT_PUBLIC_SENTRY_ENVIRONMENT=$environment")
 docker buildx build --builder "$task" --target runner --load -t "$image" "${build_args[@]}" "$source_dir"
 docker buildx build --builder "$task" --target maintenance --load -t "$image-maintenance" "${build_args[@]}" "$source_dir"
 
