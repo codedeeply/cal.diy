@@ -8,6 +8,7 @@ import getIP from "@calcom/lib/getIP";
 import { checkCfTurnstileToken } from "@calcom/lib/server/checkCfTurnstileToken";
 import { defaultResponder } from "@calcom/lib/server/defaultResponder";
 import { piiHasher } from "@calcom/lib/server/PiiHasher";
+import { identifyBookerForSentry } from "@lib/sentryBookerIdentity";
 import type { NextApiRequest } from "next";
 
 // @TODO: Didn't look at the contents of this function in order to not break old booking page.
@@ -36,6 +37,7 @@ async function handler(req: NextApiRequest & RequestMeta) {
   });
 
   validateRecurringBookingDataStructure(req.body);
+  identifyBookerForSentry(req.body[0]?.responses);
   if (process.env.NEXT_PUBLIC_CLOUDFLARE_USE_TURNSTILE_IN_BOOKER === "1") {
     await checkCfTurnstileToken({
       token: req.body[0]["cfToken"] as string,

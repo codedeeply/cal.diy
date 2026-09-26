@@ -76,12 +76,15 @@ function errorEvent(): Event {
 
 describe("scrubEvent", () => {
   it("removes identity, booking, auth and network data from error events", () => {
-    expectNoProhibitedData(scrubEvent(errorEvent()));
+    const { user, ...rest } = scrubEvent(errorEvent());
+    expectNoProhibitedData(rest);
+    expect(JSON.stringify(user)).not.toContain(prohibited.ip);
   });
 
   it("keeps the diagnostics needed to act on an error", () => {
     const event = scrubEvent(errorEvent());
-    expect(event.user).toEqual({ id: 42 });
+    // Owner decision (SLE-120): the booker's email and name identify the affected user.
+    expect(event.user).toEqual({ id: 42, email: prohibited.email, username: prohibited.name });
     expect(event.request).toEqual({
       url: "https://cal.example.invalid/team/demo",
       method: "POST",
@@ -249,6 +252,24 @@ describe("scrubEvent second CodeRabbit regressions", () => {
     });
     expectNoProhibitedData(event);
     expect(event.request?.headers?.Accept).toBe("text/html");
+  });
+});
+
+describe("scrubEvent booker identity", () => {
+  it("keeps only email and name on the user, and drops the IP and other fields", () => {
+    const event = scrubEvent({
+      user: {
+        email: prohibited.email,
+        username: prohibited.name,
+        ip_address: prohibited.ip,
+        geo: { city: "X" },
+      },
+    });
+    expect(event.user).toEqual({ email: prohibited.email, username: prohibited.name });
+  });
+
+  it("omits the user entirely when nothing identifying remains", () => {
+    expect(scrubEvent({ user: { ip_address: prohibited.ip } }).user).toBeUndefined();
   });
 });
 
