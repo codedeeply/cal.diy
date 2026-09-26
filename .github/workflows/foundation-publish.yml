@@ -1,0 +1,121 @@
+name: Foundation publish
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example caldiy-2026.10.1-rc.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: foundation-publish
+  cancel-in-progress: false
+env:
+  IMAGE_REPO: ghcr.io/codedeeply/cal.diy
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  publish:
+    name: Gate, push and sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Require main and a release version
+        run: |
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$VERSION" =~ ^caldiy-[0-9]{4}\.[0-9]{1,2}\.[0-9]+(-rc\.[0-9]+)?$ ]]
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24.21.0
+      - name: Re-gate the Foundation CI secret and CodeQL evidence for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: bash scripts/foundation-publish.sh gate-source
+      - name: Build, validate and scan the release image
+        env:
+          SLE119_RUN_ID: publish-${{ github.run_id }}-${{ github.run_attempt }}
+          EVIDENCE_DIR: ${{ runner.temp }}/release/image
+          POSTGRES_IMAGE: postgres:16@sha256:a85daf0dbd5e79586e850e3fe4b21b796799828ad015ce2166aeb98cc24da61c
+          TRIVY_IMAGE: aquasec/trivy@sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9
+          SYFT_IMAGE: anchore/syft@sha256:9ea468e53b16b387d92b253f80a14d07a2d2973e0a5017c57b604b56e6f7cc43
+          BUILDKIT_IMAGE: moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+        run: bash scripts/foundation-image.sh
+      - name: Push the gated image once
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+          LOCAL_IMAGE: caldiy-sle119:publish-${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash scripts/foundation-publish.sh push
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$IMAGE_REPO@$DIGEST"
+      # Full image SBOMs are several MB; GitHub's attestation store takes them, public Rekor may not.
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/codedeeply/cal.diy
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/release/image/sbom.cdx.json
+          push-to-registry: true
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/codedeeply/cal.diy
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Write release notes
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: bash scripts/foundation-publish.sh notes
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: foundation-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 90
+
+  verify:
+    name: Verify independently
+    needs: [publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify tag, signature, SBOM and provenance from the registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/foundation-publish.yml@refs/heads/main
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          [[ "$(docker buildx imagetools inspect "$IMAGE_REPO:$VERSION" --format '{{.Manifest.Digest}}')" == "$DIGEST" ]]
+          issuer=https://token.actions.githubusercontent.com
+          cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$issuer" "$IMAGE_REPO@$DIGEST"
+          signer="$GITHUB_REPOSITORY/.github/workflows/foundation-publish.yml"
+          gh attestation verify "oci://$IMAGE_REPO@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer"
+          gh attestation verify "oci://$IMAGE_REPO@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$signer" --predicate-type https://cyclonedx.org/bom
