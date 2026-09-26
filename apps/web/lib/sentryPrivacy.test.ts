@@ -227,6 +227,31 @@ describe("scrubEvent CodeRabbit regressions", () => {
   });
 });
 
+describe("scrubEvent second CodeRabbit regressions", () => {
+  it("filters quoted fields with dotted names", () => {
+    const event = scrubEvent({ message: `{"attendee.name":"${prohibited.name}","eventType.id":3}` });
+    expectNoProhibitedData(event);
+    expect(event.message).toContain('"eventType.id":3');
+  });
+
+  it("strips query strings from URLs embedded in free text", () => {
+    const event = scrubEvent({
+      message: `Redirect to https://cal.example.invalid/team/demo?name=Quinn+Synthetic-Booker failed`,
+      breadcrumbs: [{ category: "navigation", message: "to /booking/abc?name=Quinn+Synthetic-Booker" }],
+    });
+    expect(JSON.stringify(event)).not.toContain("Quinn");
+    expect(event.message).toBe("Redirect to https://cal.example.invalid/team/demo failed");
+  });
+
+  it("scrubs the values of allowed request headers", () => {
+    const event = scrubEvent({
+      request: { headers: { "User-Agent": `Mozilla/5.0 ${prohibited.email}`, Accept: "text/html" } },
+    });
+    expectNoProhibitedData(event);
+    expect(event.request?.headers?.Accept).toBe("text/html");
+  });
+});
+
 describe("scrubBreadcrumb", () => {
   it("drops console breadcrumbs and scrubs the rest", () => {
     expect(scrubBreadcrumb({ category: "console", message: prohibited.name })).toBeNull();
