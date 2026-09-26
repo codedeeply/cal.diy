@@ -10,7 +10,13 @@ describe("getCrossSiteRejection", () => {
   });
 
   it("rejects the simple-request content types that skip CORS preflight", () => {
-    for (const contentType of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
+    for (const contentType of [
+      "text/plain",
+      "application/x-www-form-urlencoded",
+      "multipart/form-data",
+      "application/jsonp",
+      "application/json-patch+json",
+    ]) {
       expect(getCrossSiteRejection("POST", { "content-type": contentType })).toMatch(/application\/json/);
     }
     expect(getCrossSiteRejection("POST", {})).toMatch(/application\/json/);

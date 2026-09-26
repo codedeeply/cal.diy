@@ -14,8 +14,9 @@ export function getCrossSiteRejection(
 ): string | null {
   if (method !== "POST") return null;
   if (headers["sec-fetch-site"] === "cross-site") return "Cross-site tRPC requests are not allowed";
-  const contentType = headers["content-type"];
-  if (!contentType?.toLowerCase().startsWith("application/json")) {
+  // Compare the bare media type so look-alikes such as `application/jsonp` are rejected too.
+  const mediaType = headers["content-type"]?.split(";")[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
     return "tRPC mutations require an application/json content type";
   }
   return null;
