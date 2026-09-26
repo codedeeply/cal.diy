@@ -96,6 +96,8 @@ docker stop "$task-db"
 outage=0
 check || outage=$?
 [[ "$outage" == 1 ]] || { echo "Expected the outage check to report failure (exit 1), got $outage"; exit 1; }
+# Another probe failing is not enough: the database check itself must detect the outage.
+tail -n 1 "$evidence/checks.jsonl" | grep -q '"database":"' || { echo "Outage not detected by the database check"; exit 1; }
 docker start "$task-db"
 wait_for_database
 recovered=false

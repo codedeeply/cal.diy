@@ -19,7 +19,7 @@ The full create-a-booking proof runs per release (`scripts/sle-122-booking-proof
 
 | Alert | Severity | Notify | Noise threshold |
 | --- | --- | --- | --- |
-| Monitor `caldiy-synthetic` failed or missed | High: bookers may be unable to book | Owner email (Sentry default issue alert) | 1 failed run opens the issue, 1 ok run resolves it (`failure_issue_threshold` and `recovery_threshold` = 1). A 5-minute interval plus 5-minute margin tolerates one slow run |
+| Monitor `caldiy-synthetic` failed or missed | High: bookers may be unable to book | Owner email (Sentry default issue alert) | 1 failed run opens the monitor issue, and 1 ok run resolves it (`failure_issue_threshold` and `recovery_threshold` = 1). A 5-minute interval plus 5-minute margin tolerates one slow run. The separate `Synthetic check failed: …` error issue, which names the failing checks, does **not** resolve on recovery. Resolve it after triage. |
 | New error issue in `production` | Medium | Owner email, first occurrence only | Sentry groups repeats; a regression reopens a resolved issue |
 | Error spike (>50 events/hour) | Medium | Owner email | Set in Sentry → Alerts; for one owner this is the only rate rule needed |
 
@@ -34,15 +34,18 @@ The full create-a-booking proof runs per release (`scripts/sle-122-booking-proof
    - Check that the check timer is enabled.
 3. **`… booking_page`**: the public booking page is broken while the app is up. This is usually a bad release.
    - Roll back to the previous signed image. See the SLE-121 rollback procedure.
-4. **Anything that looks like personal data in an event**: treat it as a privacy incident.
+4. **Phone numbers, notes, IP addresses or other personal data in an event** (anything beyond the booker's email and name on the event user, which the amended gate allows): treat it as a privacy incident.
    - Delete the event in Sentry.
    - Add a failing case to `sentryPrivacy.test.ts`, then fix the scrubber.
 
 ## Running the checks on a host
 
 ```sh
-BASE_URL=https://cal.example.com CANARY_BOOKING_PATH=/<owner>/<event> \
-SENTRY_DSN=<dsn> SENTRY_ENVIRONMENT=production node scripts/synthetic-checks.mjs
+export BASE_URL="https://cal.example.com"
+export CANARY_BOOKING_PATH="/owner/30min"   # your public booking page
+export SENTRY_DSN="https://key@o0.ingest.us.sentry.io/0"   # your project DSN
+export SENTRY_ENVIRONMENT="production"
+node scripts/synthetic-checks.mjs
 ```
 
 Run it every 5 minutes (systemd timer or cron). Exit codes:
