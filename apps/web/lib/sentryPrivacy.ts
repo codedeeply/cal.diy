@@ -154,7 +154,15 @@ function scrubUrlFields<T extends Record<string, unknown>>(data: T): T {
 
 /** Removes identity and booking data from error and transaction events before they are sent. */
 function scrubEvent<T extends Event>(event: T): T {
-  if (event.user) event.user = event.user.id === undefined ? undefined : { id: event.user.id };
+  if (event.user) {
+    // Owner decision (SLE-120): the booker's email and name identify affected users. The IP
+    // address and every other user field are still dropped.
+    const { id, email, username } = event.user;
+    const user = Object.fromEntries(
+      Object.entries({ id, email, username }).filter(([, value]) => value !== undefined && value !== null)
+    );
+    event.user = Object.keys(user).length ? user : undefined;
+  }
   if (event.request) {
     const { url, method, headers } = event.request;
     event.request = {
