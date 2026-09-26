@@ -3,6 +3,8 @@ import process from "node:process";
 // Polls the Sentry API until the proof's server, edge and browser errors are stored in this run's
 // environment with this run's release, or fails after the deadline.
 const { SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT } = process.env;
+// Organizations in other regions (e.g. EU: https://de.sentry.io) set SENTRY_API_URL.
+const apiBase = (process.env.SENTRY_API_URL || "https://sentry.io").replace(/\/$/, "");
 const environment = process.env.SENTRY_PROOF_ENVIRONMENT;
 const release = process.env.SENTRY_PROOF_RELEASE;
 const label = process.env.SENTRY_PROOF_LABEL;
@@ -13,7 +15,7 @@ const expected = {
 };
 
 async function api(path) {
-  const response = await fetch(`https://sentry.io/api/0${path}`, {
+  const response = await fetch(`${apiBase}/api/0${path}`, {
     headers: { Authorization: `Bearer ${SENTRY_AUTH_TOKEN}` },
   });
   if (!response.ok) throw new Error(`Sentry API ${path.split("?")[0]} returned HTTP ${response.status}`);
