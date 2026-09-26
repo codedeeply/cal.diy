@@ -7,14 +7,21 @@ const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
 const evidenceDir = process.env.EVIDENCE_DIR ?? "/artifacts";
 const marker = process.env.PROOF_MARKER ?? "browser";
 
+// Parsing the URL keeps the match to Sentry's ingest host rather than any URL containing it.
+function isSentryEnvelope(response) {
+  const url = new URL(response.url());
+  return (
+    response.request().method() === "POST" &&
+    url.hostname.endsWith(".ingest.us.sentry.io") &&
+    /^\/api\/\d+\/envelope\/$/.test(url.pathname)
+  );
+}
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 try {
   await page.goto(`${baseUrl}/auth/login`, { waitUntil: "networkidle" });
-  const accepted = page.waitForResponse(
-    (response) => /\.sentry\.io\/api\/\d+\/envelope\//.test(response.url()) && response.request().method() === "POST",
-    { timeout: 60_000 }
-  );
+  const accepted = page.waitForResponse((response) => isSentryEnvelope(response), { timeout: 60_000 });
   await page.evaluate((id) => {
     setTimeout(() => {
       throw new Error(
