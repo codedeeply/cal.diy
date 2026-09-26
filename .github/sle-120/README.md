@@ -1,7 +1,9 @@
 # SLE-120: observability runbook
 
-The instance has a single owner, Sierra. Bookers are third parties, so their data never goes to telemetry
-(see `apps/web/lib/sentryPrivacy.ts`).
+The instance has a single owner, Sierra. Bookers are third parties. By Sierra's amended gate 3
+(2026-09-26), only the booker's email and name reach Sentry, on `event.user`, to show who an error
+affected. Phone numbers, notes, request bodies and IP addresses are removed before sending
+(`apps/web/lib/sentryPrivacy.ts`).
 
 ## What reports where
 
@@ -58,3 +60,6 @@ Run it every 5 minutes (systemd timer or cron). Exit codes:
 These use fake data and the non-production Sentry project only:
 - `scripts/sle-120-sentry-proof.sh`: server, edge and browser errors, scrubbing, release and trace context.
 - `scripts/sle-120-monitor-proof.sh`: ok, then error on a stopped database, then recovery.
+
+The booking-page check passes only on HTTP 200 **and** a page containing `CANARY_BOOKING_MARKER`,
+which defaults to the event slug, so a proxy error page served with 200 still fails.

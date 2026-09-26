@@ -13,12 +13,14 @@ function listen(handler) {
   });
 }
 
-async function fixture({ databaseUp }) {
+async function fixture({ databaseUp, pageBody = "<html>30min booking</html>" }) {
   const app = await listen((request, response) => {
     if (request.url === "/api/health") {
       response
         .writeHead(databaseUp ? 200 : 503)
         .end(JSON.stringify({ status: databaseUp ? "ok" : "unavailable" }));
+    } else if (request.url === "/owner/30min") {
+      response.writeHead(200).end(pageBody);
     } else response.writeHead(200).end("page");
   });
   const envelopes = [];
@@ -76,6 +78,17 @@ test("a database outage reports an error check-in and a named failure event", as
     assert.deepEqual(eventHeader, { type: "event" });
     assert.equal(event.message.formatted, "Synthetic check failed: database (HTTP 503)");
     assert.equal(event.tags.failed_checks, "database");
+  } finally {
+    await close();
+  }
+});
+
+test("a 200 booking page without the event marker fails the booking check", async () => {
+  const { env, envelopes, close } = await fixture({ databaseUp: true, pageBody: "<html>Bad gateway</html>" });
+  try {
+    await assert.rejects(run("node", ["scripts/synthetic-checks.mjs"], { env }), (error) => error.code === 1);
+    const [, , , event] = items(envelopes[0].body);
+    assert.equal(event.tags.failed_checks, "booking_page");
   } finally {
     await close();
   }

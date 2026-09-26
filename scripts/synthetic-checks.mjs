@@ -8,7 +8,8 @@
 // send email. The full create-a-booking proof runs per release (scripts/sle-122-booking-proof.sh).
 //
 // Env: BASE_URL, SENTRY_DSN, CANARY_BOOKING_PATH (e.g. /owner/30min), SENTRY_ENVIRONMENT,
-// SENTRY_RELEASE, MONITOR_SLUG (default caldiy-synthetic), CHECK_INTERVAL_MINUTES (default 5).
+// SENTRY_RELEASE, MONITOR_SLUG (default caldiy-synthetic), CHECK_INTERVAL_MINUTES (default 5),
+// CANARY_BOOKING_MARKER (text the booking page must contain; defaults to the event slug).
 import { randomUUID } from "node:crypto";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -31,12 +32,17 @@ async function probe(url, accept) {
   }
 }
 
-async function runChecks(baseUrl, canaryPath) {
+async function runChecks(baseUrl, canaryPath, canaryMarker) {
   const checks = {
     uptime: () => probe(`${baseUrl}/auth/login`, (response) => response.status === 200),
     database: () =>
       probe(`${baseUrl}/api/health`, (response, body) => response.status === 200 && body.includes('"ok"')),
-    booking_page: () => probe(`${baseUrl}${canaryPath}`, (response) => response.status === 200),
+    // A proxy or error page can also answer 200, so the page must contain the event's marker.
+    booking_page: () =>
+      probe(
+        `${baseUrl}${canaryPath}`,
+        (response, body) => response.status === 200 && body.includes(canaryMarker)
+      ),
   };
   const results = {};
   for (const [name, check] of Object.entries(checks)) results[name] = await check();
@@ -70,13 +76,15 @@ async function main() {
   const baseUrl = required("BASE_URL").replace(/\/$/, "");
   const dsn = required("SENTRY_DSN");
   const canaryPath = required("CANARY_BOOKING_PATH");
+  // Defaults to the event slug (last path segment), which Cal renders into the booking page.
+  const canaryMarker = process.env.CANARY_BOOKING_MARKER || canaryPath.split("/").filter(Boolean).pop();
   const environment = process.env.SENTRY_ENVIRONMENT || "production";
   const release = process.env.SENTRY_RELEASE || undefined;
   const slug = process.env.MONITOR_SLUG || "caldiy-synthetic";
   const interval = Number(process.env.CHECK_INTERVAL_MINUTES || 5);
 
   const started = Date.now();
-  const results = await runChecks(baseUrl, canaryPath);
+  const results = await runChecks(baseUrl, canaryPath, canaryMarker);
   const failed = Object.entries(results).filter(([, failure]) => failure);
   const status = failed.length ? "error" : "ok";
   const items = [
