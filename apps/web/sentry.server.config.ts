@@ -5,6 +5,7 @@
 // The config you add here will be used whenever the server handles a request.
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 import * as Sentry from "@sentry/nextjs";
+import { scrubBreadcrumb, scrubEvent } from "./lib/sentryPrivacy";
 
 Sentry.init({
   debug: !!process.env.SENTRY_DEBUG,
@@ -12,11 +13,16 @@ Sentry.init({
   sampleRate: parseFloat(process.env.SENTRY_SAMPLE_RATE ?? "1.0") || 1.0,
   tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0.0") || 0.0,
   integrations: [Sentry.prismaIntegration(), Sentry.httpIntegration()],
+  sendDefaultPii: false,
+  // Metrics attach scope user fields and have no scrubbing hook in this configuration.
+  enableMetrics: false,
   beforeSend(event) {
     event.tags = {
       ...event.tags,
       errorSource: "server",
     };
-    return event;
+    return scrubEvent(event);
   },
+  beforeSendTransaction: scrubEvent,
+  beforeBreadcrumb: scrubBreadcrumb,
 });
