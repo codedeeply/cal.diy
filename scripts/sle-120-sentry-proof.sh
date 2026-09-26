@@ -96,7 +96,7 @@ printf '{"unauthorised":%s,"server":%s,"edge":%s}\n' "$unauthorised" "$server" "
 
 docker build --file "$source_dir/.github/sgy-971/Dockerfile.playwright" --tag "$task-playwright" "$source_dir/.github/sgy-971"
 docker run --rm --network "container:$task-web" -e BASE_URL=http://localhost:3000 -e EVIDENCE_DIR=/artifacts \
-  -e "PROOF_MARKER=$label" -v "$evidence:/artifacts" \
+  -e "PROOF_MARKER=$label" -e "SENTRY_DSN=$SENTRY_DSN" -v "$evidence:/artifacts" \
   -v "$source_dir/.github/sle-120/sentry-browser-proof.mjs:/proof/sentry-browser-proof.mjs:ro" \
   --entrypoint node "$task-playwright" sentry-browser-proof.mjs
 # Give the server SDK time to flush before the container is removed.
