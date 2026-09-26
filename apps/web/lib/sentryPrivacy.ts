@@ -76,11 +76,13 @@ const phonePattern = /\+\d[\d\s().-]{6,}\d|\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b
 // Serialized fields in log and error messages: JSON (`"email":"x"`, `\"name\":\"x\"`) and the
 // object-literal form Prisma uses in validation errors (`name: "x"`).
 const fieldPatterns = [
-  /(\\?"([A-Za-z_]+)\\?"\s*:\s*)(\\?")((?:\\\\|\\[^"\\]|[^"\\])*?)\3/g,
-  /(\b([A-Za-z_]+)\s*:\s*)(")((?:\\.|[^"\\\n])*?)"/g,
+  /(\\?"([A-Za-z_][\w.-]{0,127})\\?"\s*:\s*)(\\?")((?:\\\\|\\[^"\\]|[^"\\])*?)\3/g,
+  /(\b([A-Za-z_][\w.-]{0,127})\s*:\s*)(")((?:\\.|[^"\\\n])*?)"/g,
 ];
 // Unquoted numeric values such as `"phone":4155550142`, which the phone pattern alone misses.
-const numericFieldPattern = /(\\?"?\b([A-Za-z_]+)\\?"?\s*:\s*)(\+?\d[\d\s().-]{3,}\d)/g;
+const numericFieldPattern = /(\\?"?\b([A-Za-z_][\w.-]{0,127})\\?"?\s*:\s*)(\+?\d[\d\s().-]{3,}\d)/g;
+// Query strings on absolute URLs or paths inside free text (booking-page prefill carries names).
+const embeddedQueryPattern = /((?:https?:\/\/|\/)[^\s"'<>?#]{0,2048})\?[^\s"'<>#]{0,4096}/g;
 
 function keyWords(key: string): string[] {
   const words = key
@@ -111,7 +113,10 @@ function scrubString(value: string): string {
     // Dropping the final partial token stops a cut-off email or number from escaping the patterns.
     scrubbed = `${scrubbed.slice(0, maxScrubbedLength).replace(/\S*$/, "")}…`;
   }
-  return scrubbed.replace(emailPattern, FILTERED).replace(phonePattern, FILTERED);
+  return scrubbed
+    .replace(embeddedQueryPattern, "$1")
+    .replace(emailPattern, FILTERED)
+    .replace(phonePattern, FILTERED);
 }
 
 function stripQuery(url: string): string {
@@ -137,14 +142,14 @@ function scrubRecord<T>(value: T): T {
 
 // Scrubbing only replaces string values with strings, so the input's value types still hold.
 function scrubUrlFields<T extends Record<string, unknown>>(data: T): T {
-  const result: Record<string, unknown> = scrubRecord(data);
-  for (const [key, value] of Object.entries(result)) {
-    // Next.js request paths (e.g. `request_path`) include booking-page prefill query strings.
-    if (typeof value === "string" && (urlKeys.includes(key) || /path$/i.test(key))) {
-      result[key] = stripQuery(value);
-    }
+  // Whole queries go first: text scrubbing stops at whitespace, and Next.js request paths
+  // (e.g. `request_path`) include booking-page prefill query strings.
+  const withoutQueries: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    const isUrl = typeof value === "string" && (urlKeys.includes(key) || /path$/i.test(key));
+    withoutQueries[key] = isUrl ? stripQuery(value) : value;
   }
-  return result as T;
+  return scrubRecord(withoutQueries) as T;
 }
 
 /** Removes identity and booking data from error and transaction events before they are sent. */
@@ -155,8 +160,13 @@ function scrubEvent<T extends Event>(event: T): T {
     event.request = {
       url: url ? stripQuery(url) : undefined,
       method,
+      // Allowed header values are still client-controlled text, so they are scrubbed too.
       headers: headers
-        ? Object.fromEntries(Object.entries(headers).filter(([name]) => safeHeaders.has(name.toLowerCase())))
+        ? Object.fromEntries(
+            Object.entries(headers)
+              .filter(([name]) => safeHeaders.has(name.toLowerCase()))
+              .map(([name, value]) => [name, scrubString(value)])
+          )
         : undefined,
     };
   }
@@ -193,10 +203,10 @@ function scrubEvent<T extends Event>(event: T): T {
       return scrubbed ? [scrubbed] : [];
     });
   }
-  if (event.transaction) event.transaction = stripQuery(scrubString(event.transaction));
+  if (event.transaction) event.transaction = scrubString(stripQuery(event.transaction));
   if (event.spans) {
     for (const span of event.spans) {
-      if (span.description) span.description = stripQuery(scrubString(span.description));
+      if (span.description) span.description = scrubString(stripQuery(span.description));
       if (span.data) span.data = scrubUrlFields(span.data);
     }
   }
