@@ -69,7 +69,7 @@ start_web() {
   local app_image=$1 database=$2 platform=()
   [[ "$app_image" == "$PREVIOUS_IMAGE" ]] && platform=(--platform linux/amd64)
   local db="postgresql://postgres:postgres@$database:5432/calendso"
-  docker run -d "${platform[@]}" --name "$task-web" --network "$task" -e "DATABASE_URL=$db" -e "DATABASE_DIRECT_URL=$db" \
+  docker run -d ${platform[@]+"${platform[@]}"} --name "$task-web" --network "$task" -e "DATABASE_URL=$db" -e "DATABASE_DIRECT_URL=$db" \
     -e "NEXTAUTH_SECRET=$nextauth_secret" -e "CALENDSO_ENCRYPTION_KEY=$encryption_key" \
     -e NEXTAUTH_URL=http://localhost:3000 -e NEXT_PUBLIC_WEBAPP_URL=http://localhost:3000 -e CALCOM_TELEMETRY_DISABLED=1 \
     "$app_image" > /dev/null
