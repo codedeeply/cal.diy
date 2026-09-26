@@ -205,6 +205,28 @@ describe("scrubEvent privacy review regressions", () => {
   });
 });
 
+describe("scrubEvent CodeRabbit regressions", () => {
+  it("filters a quoted field whose closing quote lies past the truncation point", () => {
+    const event = scrubEvent({ message: `${"x".repeat(8180)} {"name":"${prohibited.name}"}` });
+    expectNoProhibitedData(event);
+  });
+
+  it("filters unquoted numeric values under sensitive keys", () => {
+    const event = scrubEvent({ message: '{"phone":4155550142,"eventTypeId":12}' });
+    expect(event.message).not.toContain("4155550142");
+    expect(event.message).toContain('"eventTypeId":12');
+  });
+
+  it("withholds objects nested deeper than the scrubber inspects", () => {
+    let nested: Record<string, unknown> = { email: prohibited.email, name: prohibited.name };
+    for (let level = 0; level < 12; level++) nested = { level: nested };
+    const event = scrubEvent({ extra: { nested } });
+    expectNoProhibitedData(event);
+    const crumb = scrubBreadcrumb({ category: "fetch", data: { nested } });
+    expectNoProhibitedData(crumb);
+  });
+});
+
 describe("scrubBreadcrumb", () => {
   it("drops console breadcrumbs and scrubs the rest", () => {
     expect(scrubBreadcrumb({ category: "console", message: prohibited.name })).toBeNull();

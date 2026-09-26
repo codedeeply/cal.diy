@@ -79,6 +79,8 @@ const fieldPatterns = [
   /(\\?"([A-Za-z_]+)\\?"\s*:\s*)(\\?")((?:\\\\|\\[^"\\]|[^"\\])*?)\3/g,
   /(\b([A-Za-z_]+)\s*:\s*)(")((?:\\.|[^"\\\n])*?)"/g,
 ];
+// Unquoted numeric values such as `"phone":4155550142`, which the phone pattern alone misses.
+const numericFieldPattern = /(\\?"?\b([A-Za-z_]+)\\?"?\s*:\s*)(\+?\d[\d\s().-]{3,}\d)/g;
 
 function keyWords(key: string): string[] {
   const words = key
@@ -94,11 +96,20 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function scrubString(value: string): string {
-  let scrubbed = value.length > maxScrubbedLength ? `${value.slice(0, maxScrubbedLength)}…` : value;
+  // Field patterns are linear and run before truncation, so a value whose closing quote lies past
+  // the cut-off is still filtered.
+  let scrubbed = value;
   for (const pattern of fieldPatterns) {
     scrubbed = scrubbed.replace(pattern, (match, prefix: string, key: string, quote: string) =>
       isSensitiveKey(key) ? `${prefix}${quote}${FILTERED}${quote}` : match
     );
+  }
+  scrubbed = scrubbed.replace(numericFieldPattern, (match, prefix: string, key: string) =>
+    isSensitiveKey(key) ? `${prefix}${FILTERED}` : match
+  );
+  if (scrubbed.length > maxScrubbedLength) {
+    // Dropping the final partial token stops a cut-off email or number from escaping the patterns.
+    scrubbed = `${scrubbed.slice(0, maxScrubbedLength).replace(/\S*$/, "")}…`;
   }
   return scrubbed.replace(emailPattern, FILTERED).replace(phonePattern, FILTERED);
 }
@@ -109,7 +120,9 @@ function stripQuery(url: string): string {
 
 function scrubValue(value: unknown, depth = 0): unknown {
   if (typeof value === "string") return scrubString(value);
-  if (depth > 8 || value === null || typeof value !== "object") return value;
+  if (value === null || typeof value !== "object") return value;
+  // Anything nested deeper than we inspect is withheld rather than sent unchecked.
+  if (depth > 8) return FILTERED;
   if (Array.isArray(value)) return value.map((item) => scrubValue(item, depth + 1));
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
