@@ -7,10 +7,13 @@ set -euo pipefail
 label=${1:?Usage: sle-120-sentry-proof.sh <run-label> [evidence-root]}
 [[ "$label" =~ ^[a-z0-9-]+$ ]] || { echo "Run label must be lowercase letters, digits and dashes"; exit 1; }
 : "${SENTRY_DSN:?Set SENTRY_DSN to the non-production project DSN}"
+# Delivery is confirmed by reading the events back, so a read token for the same project is required.
+: "${SENTRY_AUTH_TOKEN:?Set SENTRY_AUTH_TOKEN to a token with event:read on the project}"
+: "${SENTRY_ORG:?Set SENTRY_ORG to the Sentry organization slug}" "${SENTRY_PROJECT:?Set SENTRY_PROJECT to the Sentry project slug}"
 POSTGRES_IMAGE=postgres:16@sha256:a85daf0dbd5e79586e850e3fe4b21b796799828ad015ce2166aeb98cc24da61c
 BUILDKIT_IMAGE=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
-for tool in docker git openssl curl; do command -v "$tool" > /dev/null || { echo "Missing required tool: $tool"; exit 1; }; done
+for tool in docker git openssl curl node; do command -v "$tool" > /dev/null || { echo "Missing required tool: $tool"; exit 1; }; done
 docker info > /dev/null || { echo "Docker engine is unavailable"; exit 1; }
 repo=$(git rev-parse --show-toplevel)
 sha=$(git -C "$repo" rev-parse HEAD)
@@ -100,6 +103,7 @@ docker run --rm --network "container:$task-web" -e BASE_URL=http://localhost:300
   -e "PROOF_MARKER=$label" -e "SENTRY_DSN=$SENTRY_DSN" -v "$evidence:/artifacts" \
   -v "$source_dir/.github/sle-120/sentry-browser-proof.mjs:/proof/sentry-browser-proof.mjs:ro" \
   --entrypoint node "$task-playwright" sentry-browser-proof.mjs
-# Give the server SDK time to flush before the container is removed.
-sleep 10
-echo "SLE-120 Sentry proof $label: events sent (release $sha, environment $environment). Evidence: $evidence"
+# A 500 only proves each route threw; success requires every event to be stored by Sentry.
+SENTRY_PROOF_ENVIRONMENT="$environment" SENTRY_PROOF_RELEASE="$sha" SENTRY_PROOF_LABEL="$label" \
+  node "$source_dir/.github/sle-120/verify-sentry-delivery.mjs" | tee "$evidence/delivery.json"
+echo "SLE-120 Sentry proof $label: PASS (server, edge and browser events stored with release $sha, environment $environment). Evidence: $evidence"
