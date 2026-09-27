@@ -85,9 +85,14 @@ ENV NEXT_PUBLIC_WEBAPP_URL=$NEXT_PUBLIC_WEBAPP_URL \
 
 RUN sh scripts/replace-placeholder.sh http://NEXT_PUBLIC_WEBAPP_URL_PLACEHOLDER "${NEXT_PUBLIC_WEBAPP_URL}"
 
-FROM builder AS maintenance
+FROM runtime-base AS maintenance
 
-# Migration and seed tooling must not be shipped in the serving image.
+WORKDIR /calcom
+# Migration and seed tooling must not be shipped in the serving image. This image is published
+# too, so it starts from the slim base and drops build-only Go binaries (depot, esbuild) whose
+# unfixed CVEs would otherwise block publication; migrate and seed need neither.
+COPY --from=builder /calcom ./
+RUN find node_modules -type d \( -name @depot -o -name @esbuild \) -prune -exec rm -rf {} +
 COPY scripts ./scripts
 ENV DATABASE_URL=""
 ENV DATABASE_DIRECT_URL=""
