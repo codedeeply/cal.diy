@@ -82,8 +82,9 @@ version: `-stg` (for example `caldiy-2026.10.1-rc.2-stg`) builds for
 `http://localhost:3000`. The version also fixes the browser Sentry tags:
 `NEXT_PUBLIC_SENTRY_ENVIRONMENT` is `staging` for `-stg` and `production`
 otherwise, `NEXT_PUBLIC_SENTRY_RELEASE` is the version, and the client DSN comes
-from the `SENTRY_DSN_CLIENT` Actions variable (a public identifier; unset means
-browser reporting is off). Every build sets `NEXT_PUBLIC_DISABLE_SIGNUP=true`;
+from the `SENTRY_DSN_CLIENT_STAGING` or `SENTRY_DSN_CLIENT_PRODUCTION` Actions
+variable, one Sentry project each (public identifiers; unset means browser
+reporting is off). Every build sets `NEXT_PUBLIC_DISABLE_SIGNUP=true`;
 the owner account is created once through `/auth/setup`.
 
 `publish-policy` in Foundation quality pins
