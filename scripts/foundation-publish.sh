@@ -68,8 +68,10 @@ case "${1:-}" in
       [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
       echo "$digest"
     }
-    digest=$(push_digest "$LOCAL_IMAGE" "$VERSION")
+    # Maintenance first: a release tag then implies its migrations exist. A run that fails after
+    # either push leaves an unsigned tag, which cosign verification rejects; retry as a new version.
     maintenance_digest=$(push_digest "$LOCAL_IMAGE-maintenance" "$VERSION-maintenance")
+    digest=$(push_digest "$LOCAL_IMAGE" "$VERSION")
     echo "$digest" > "$RELEASE_DIR/digest.txt"
     echo "$maintenance_digest" > "$RELEASE_DIR/maintenance-digest.txt"
     {
@@ -84,8 +86,10 @@ case "${1:-}" in
     export SBOM_SHA256 CI_RUN
     node scripts/foundation-gates.mjs release-notes "$verdicts" > "$RELEASE_DIR/release-notes.md"
     # The push step already refused a maintenance image that failed its publication verdict.
-    printf '\nMaintenance (migrations) image: %s@%s\n' "$IMAGE_REPO" "$(cat "$RELEASE_DIR/maintenance-digest.txt")" \
-      >> "$RELEASE_DIR/release-notes.md"
+    residual=$(node -p 'Object.entries(JSON.parse(require("fs").readFileSync(process.argv[1])).counts).map(([k, v]) => k + " " + v).join(", ") || "none"' \
+      "$verdicts/maintenance-image.json")
+    printf '\nMaintenance (migrations) image: %s@%s (residual: %s)\n' "$IMAGE_REPO" \
+      "$(cat "$RELEASE_DIR/maintenance-digest.txt")" "$residual" >> "$RELEASE_DIR/release-notes.md"
     cat "$RELEASE_DIR/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
     ;;
   *)

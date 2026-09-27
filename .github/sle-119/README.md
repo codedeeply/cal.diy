@@ -72,8 +72,10 @@ verifies tag, signature, SBOM and provenance from the registry. Release notes
 
 Each release also pushes `<version>-maintenance`, the migration image (`prisma
 migrate deploy` plus app-store seed), signed and provenance-attested like the
-runner. It is held to the publication threshold only, since the baseline
-ratchet covers the runner. The image serves exactly one URL, fixed by the
+runner and pushed before it. It is held to the publication threshold only,
+since the baseline ratchet covers the runner; its residual counts appear in
+the release notes. A run that fails after a push leaves an unsigned tag that
+verification rejects; retry under a new version. The image serves exactly one URL, fixed by the
 version: `-stg` (for example `caldiy-2026.10.1-rc.2-stg`) builds for
 `https://scheduling-stg.sierrathacker.me`; any other version builds for
 `http://localhost:3000`. Every build sets `NEXT_PUBLIC_DISABLE_SIGNUP=true`;
