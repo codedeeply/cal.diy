@@ -68,8 +68,8 @@ case "${1:-}" in
       [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
       echo "$digest"
     }
-    # Maintenance first: a release tag then implies its migrations exist. A run that fails after
-    # either push leaves an unsigned tag, which cosign verification rejects; retry as a new version.
+    # Maintenance first: a release tag then implies its migrations exist. Tags from a run whose
+    # verify job did not succeed are not a release, signed or not; retry as a new version.
     maintenance_digest=$(push_digest "$LOCAL_IMAGE-maintenance" "$VERSION-maintenance")
     digest=$(push_digest "$LOCAL_IMAGE" "$VERSION")
     echo "$digest" > "$RELEASE_DIR/digest.txt"
