@@ -2508,7 +2508,7 @@ __metadata:
     jose: "npm:4.15.9"
     lru-cache: "npm:9.0.3"
     next-auth: "npm:4.24.15"
-    nodemailer: "npm:7.0.12"
+    nodemailer: "npm:9.1.1"
     otplib: "npm:12.0.1"
   languageName: unknown
   linkType: soft
@@ -3423,7 +3423,7 @@ __metadata:
     next-themes: "npm:0.2.0"
     node-html-parser: "npm:6.1.13"
     node-mocks-http: "npm:1.16.2"
-    nodemailer: "npm:7.0.12"
+    nodemailer: "npm:9.1.1"
     nuqs: "npm:2.8.2"
     openid-client: "npm:6.5.0"
     otplib: "npm:12.0.1"
@@ -32091,10 +32091,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"nodemailer@npm:7.0.12":
-  version: 7.0.12
-  resolution: "nodemailer@npm:7.0.12"
-  checksum: 10/31a2713be588fb6849d05698cb355a88902a64e17e63b1a5c8a10db3acc4349c329c3bbd83bc5bdefda92f8df5e0297364502f93042c0bae87c48e5652b663b7
+"nodemailer@npm:9.1.1":
+  version: 9.1.1
+  resolution: "nodemailer@npm:9.1.1"
+  checksum: 10/d84fd16456a8b1e1f979e65f78f3963819ed0500aaf51544d5da04634ceb0364e5ad7c784793bf7dd7b0028d4bee1d48e5b316394c5c538dbda99f4fc5aa7502
   languageName: node
   linkType: hard
 
