@@ -1,12 +1,10 @@
 import { captureException } from "@sentry/nextjs";
+import type { AnyRouter } from "@trpc/server";
+import { TRPCError } from "@trpc/server";
 import type { NextApiRequest } from "next";
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ZodIssue } from "zod";
 import { ZodError } from "zod";
-
-import { TRPCError } from "@trpc/server";
-import type { AnyRouter } from "@trpc/server";
-
 import { createNextApiHandler } from "./createNextApiHandler";
 import { errorFormatter } from "./errorFormatter";
 import { onErrorHandler } from "./onErrorHandler";
@@ -174,5 +172,26 @@ describe("createNextApiHandler", () => {
       expect(consoleSpy).not.toHaveBeenCalled();
       expect(captureException).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("createNextApiHandler cross-site guard", () => {
+  it("rejects a cross-site text/plain mutation before tRPC parses it", async () => {
+    const handler = createNextApiHandler({
+      createCaller: vi.fn(),
+      _def: { procedures: {}, middleware: [], contextOptions: {} },
+    } as unknown as AnyRouter);
+    const json = vi.fn();
+    const res = { status: vi.fn(() => ({ json })) };
+    await handler(
+      {
+        method: "POST",
+        url: "/api/trpc/webhook/create",
+        headers: { "content-type": "text/plain" },
+      } as NextApiRequest,
+      res as unknown as Parameters<typeof handler>[1]
+    );
+    expect(res.status).toHaveBeenCalledWith(415);
+    expect(json).toHaveBeenCalledWith({ error: "tRPC mutations require an application/json content type" });
   });
 });

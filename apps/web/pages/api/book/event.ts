@@ -12,9 +12,11 @@ import { piiHasher } from "@calcom/lib/server/PiiHasher";
 import type { TraceContext } from "@calcom/lib/tracing";
 import { prisma } from "@calcom/prisma";
 import { CreationSource } from "@calcom/prisma/enums";
+import { identifyBookerForSentry } from "@lib/sentryBookerIdentity";
 import type { NextApiRequest } from "next";
 
 async function handler(req: NextApiRequest & { userId?: number; traceContext: TraceContext }) {
+  identifyBookerForSentry(req.body?.responses);
   const userIp = getIP(req);
 
   if (process.env.NEXT_PUBLIC_CLOUDFLARE_USE_TURNSTILE_IN_BOOKER === "1") {

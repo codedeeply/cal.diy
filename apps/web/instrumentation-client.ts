@@ -1,12 +1,16 @@
 // This file configures the initialization of Sentry on the client.
 // The added config here will be used whenever a users loads a page in their browser.
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
+
 import * as Sentry from "@sentry/nextjs";
 import { initBotId } from "botid/client/core";
+import { scrubBreadcrumb, scrubEvent } from "./lib/sentryPrivacy";
 
 if (process.env.NODE_ENV === "production") {
   Sentry.init({
     dsn: process.env.NEXT_PUBLIC_SENTRY_DSN_CLIENT,
+    release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
+    environment: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
 
     sampleRate: parseFloat(process.env.SENTRY_SAMPLE_RATE ?? "1.0") || 1.0,
     // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
@@ -22,6 +26,9 @@ if (process.env.NODE_ENV === "production") {
 
     // Setting this option to true will print useful information to the console while you're setting up Sentry.
     debug: !!process.env.SENTRY_DEBUG,
+    sendDefaultPii: false,
+    // Metrics attach scope user fields and have no scrubbing hook in this configuration.
+    enableMetrics: false,
     beforeSend(event) {
       if (
         event.exception?.values?.some(
@@ -39,8 +46,10 @@ if (process.env.NODE_ENV === "production") {
         ...event.tags,
         errorSource: "client",
       };
-      return event;
+      return scrubEvent(event);
     },
+    beforeSendTransaction: scrubEvent,
+    beforeBreadcrumb: scrubBreadcrumb,
   });
 }
 

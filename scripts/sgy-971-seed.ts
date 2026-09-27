@@ -19,6 +19,8 @@ async function main(): Promise<void> {
         title: "SGY-971 30 Minute Proof",
         slug: "30-min",
         length: 30,
+        // The default Cal Video location would invoke the Daily integration during booking.
+        locations: [{ type: "inPerson", address: "Synthetic proof room" }],
       },
     ],
   });

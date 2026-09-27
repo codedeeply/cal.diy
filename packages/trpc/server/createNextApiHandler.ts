@@ -1,14 +1,16 @@
+import process from "node:process";
 import type { AnyRouter } from "@trpc/server";
 import { createNextApiHandler as _createNextApiHandler } from "@trpc/server/adapters/next";
-
+import type { NextApiRequest, NextApiResponse } from "next";
 import { createContext as createTrpcContext } from "./createContext";
 import { onErrorHandler } from "./onErrorHandler";
+import { getCrossSiteRejection } from "./rejectCrossSiteRequest";
 
 /**
  * Creates an API handler executed by Next.js.
  */
 export function createNextApiHandler(router: AnyRouter, isPublic = false, namespace = "") {
-  return _createNextApiHandler({
+  const handler = _createNextApiHandler({
     router,
     /**
      * @link https://trpc.io/docs/context
@@ -85,4 +87,13 @@ export function createNextApiHandler(router: AnyRouter, isPublic = false, namesp
       return defaultHeaders;
     },
   });
+
+  return async (req: NextApiRequest, res: NextApiResponse) => {
+    const rejection = getCrossSiteRejection(req.method, req.headers);
+    if (rejection) {
+      res.status(415).json({ error: rejection });
+      return;
+    }
+    return handler(req, res);
+  };
 }
