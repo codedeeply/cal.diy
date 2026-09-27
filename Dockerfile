@@ -13,6 +13,8 @@ ARG CALENDSO_ENCRYPTION_KEY=secret
 ARG MAX_OLD_SPACE_SIZE=6144
 ARG NEXT_PUBLIC_API_V2_URL
 ARG CSP_POLICY
+# Next.js inlines NEXT_PUBLIC_* values at build time, so signup can only be switched off here.
+ARG NEXT_PUBLIC_DISABLE_SIGNUP
 
 ## We need these variables as required by Next.js build to create rewrites
 ARG NEXT_PUBLIC_SINGLE_ORG_SLUG
@@ -38,6 +40,7 @@ ENV NEXT_PUBLIC_WEBAPP_URL=http://NEXT_PUBLIC_WEBAPP_URL_PLACEHOLDER \
   NODE_OPTIONS=--max-old-space-size=${MAX_OLD_SPACE_SIZE} \
   BUILD_STANDALONE=true \
   CSP_POLICY=$CSP_POLICY \
+  NEXT_PUBLIC_DISABLE_SIGNUP=$NEXT_PUBLIC_DISABLE_SIGNUP \
   NEXT_PUBLIC_SENTRY_DSN_CLIENT=$NEXT_PUBLIC_SENTRY_DSN_CLIENT \
   NEXT_PUBLIC_SENTRY_RELEASE=$NEXT_PUBLIC_SENTRY_RELEASE \
   NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
@@ -82,9 +85,14 @@ ENV NEXT_PUBLIC_WEBAPP_URL=$NEXT_PUBLIC_WEBAPP_URL \
 
 RUN sh scripts/replace-placeholder.sh http://NEXT_PUBLIC_WEBAPP_URL_PLACEHOLDER "${NEXT_PUBLIC_WEBAPP_URL}"
 
-FROM builder AS maintenance
+FROM runtime-base AS maintenance
 
-# Migration and seed tooling must not be shipped in the serving image.
+WORKDIR /calcom
+# Migration and seed tooling must not be shipped in the serving image. This image is published
+# too, so it starts from the slim base and drops build-only Go binaries (depot, esbuild) whose
+# unfixed CVEs would otherwise block publication; migrate and seed need neither.
+COPY --from=builder /calcom ./
+RUN find node_modules -type d \( -name @depot -o -name @esbuild \) -prune -exec rm -rf {} +
 COPY scripts ./scripts
 ENV DATABASE_URL=""
 ENV DATABASE_DIRECT_URL=""

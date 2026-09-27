@@ -45,23 +45,39 @@ case "${1:-}" in
     gate config "$RELEASE_DIR/image/trivy-config.json"
     gate dependencies "$RELEASE_DIR/image/trivy-lock.json"
     gate image "$RELEASE_DIR/image/trivy-image.json"
+    node scripts/foundation-gates.mjs publication image "$RELEASE_DIR/image/trivy-maintenance.json" \
+      > "$verdicts/maintenance-image.json"
     echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
     # Release tags are write-once, so a re-run can never silently repoint a published version.
     # Only a definite "not found" counts as absent; any other registry error stops the job.
-    if lookup=$(docker buildx imagetools inspect "$IMAGE_REPO:$VERSION" 2>&1); then
-      echo "Refusing to replace existing tag $IMAGE_REPO:$VERSION"
-      exit 1
-    fi
-    grep -qiE 'not found|manifest unknown' <<< "$lookup" || { echo "$lookup"; exit 1; }
-    docker tag "$LOCAL_IMAGE" "$IMAGE_REPO:$VERSION"
-    docker push "$IMAGE_REPO:$VERSION"
-    # The digest comes from our own push, not a later registry read someone else could race.
-    repo_digest=$(docker image inspect "$IMAGE_REPO:$VERSION" --format '{{index .RepoDigests 0}}')
-    [[ "$repo_digest" == "$IMAGE_REPO@"* ]]
-    digest=${repo_digest#"$IMAGE_REPO@"}
-    [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+    for tag in "$VERSION" "$VERSION-maintenance"; do
+      if lookup=$(docker buildx imagetools inspect "$IMAGE_REPO:$tag" 2>&1); then
+        echo "Refusing to replace existing tag $IMAGE_REPO:$tag"
+        exit 1
+      fi
+      grep -qiE 'not found|manifest unknown' <<< "$lookup" || { echo "$lookup"; exit 1; }
+    done
+    push_digest() {
+      docker tag "$1" "$IMAGE_REPO:$2"
+      docker push "$IMAGE_REPO:$2" > /dev/null
+      # The digest comes from our own push, not a later registry read someone else could race.
+      local repo_digest digest
+      repo_digest=$(docker image inspect "$IMAGE_REPO:$2" --format '{{index .RepoDigests 0}}')
+      [[ "$repo_digest" == "$IMAGE_REPO@"* ]]
+      digest=${repo_digest#"$IMAGE_REPO@"}
+      [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+      echo "$digest"
+    }
+    # Maintenance first: a release tag then implies its migrations exist. Tags from a run whose
+    # verify job did not succeed are not a release, signed or not; retry as a new version.
+    maintenance_digest=$(push_digest "$LOCAL_IMAGE-maintenance" "$VERSION-maintenance")
+    digest=$(push_digest "$LOCAL_IMAGE" "$VERSION")
     echo "$digest" > "$RELEASE_DIR/digest.txt"
-    echo "digest=$digest" >> "$GITHUB_OUTPUT"
+    echo "$maintenance_digest" > "$RELEASE_DIR/maintenance-digest.txt"
+    {
+      echo "digest=$digest"
+      echo "maintenance_digest=$maintenance_digest"
+    } >> "$GITHUB_OUTPUT"
     ;;
   notes)
     : "${DIGEST:?}" "${GITHUB_STEP_SUMMARY:?}"
@@ -69,6 +85,11 @@ case "${1:-}" in
     CI_RUN=$(cat "$RELEASE_DIR/ci-run.txt")
     export SBOM_SHA256 CI_RUN
     node scripts/foundation-gates.mjs release-notes "$verdicts" > "$RELEASE_DIR/release-notes.md"
+    # The push step already refused a maintenance image that failed its publication verdict.
+    residual=$(node -p 'Object.entries(JSON.parse(require("fs").readFileSync(process.argv[1])).counts).map(([k, v]) => k + " " + v).join(", ") || "none"' \
+      "$verdicts/maintenance-image.json")
+    printf '\nMaintenance (migrations) image: %s@%s (residual: %s)\n' "$IMAGE_REPO" \
+      "$(cat "$RELEASE_DIR/maintenance-digest.txt")" "$residual" >> "$RELEASE_DIR/release-notes.md"
     cat "$RELEASE_DIR/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
     ;;
   *)

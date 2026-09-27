@@ -68,7 +68,26 @@ CycloneDX SBOM is attached with `actions/attest-sbom`, and SLSA provenance is
 recorded with `actions/attest-build-provenance`. A separate read-only job then
 verifies tag, signature, SBOM and provenance from the registry. Release notes
 (source SHA, digest, SBOM hash, residual counts) are the job summary and the
-`foundation-release-*` artifact. `publish-policy` in Foundation quality pins
+`foundation-release-*` artifact.
+
+Each release also pushes `<version>-maintenance`, the migration image (`prisma
+migrate deploy` plus app-store seed), signed and provenance-attested like the
+runner and pushed before it. It is held to the publication threshold only,
+since the baseline ratchet covers the runner; its residual counts appear in
+the release notes. A release is complete only when its run's verify job
+succeeded: a run that fails after a push can leave tags, signed or not, that
+are never handed over for deployment. Retry under a new version. The image serves exactly one URL, fixed by the
+version: `-stg` (for example `caldiy-2026.10.1-rc.2-stg`) builds for
+`https://scheduling-stg.sierrathacker.me`; any other version builds for
+`http://localhost:3000`. The version also fixes the browser Sentry tags:
+`NEXT_PUBLIC_SENTRY_ENVIRONMENT` is `staging` for `-stg` and `production`
+otherwise, `NEXT_PUBLIC_SENTRY_RELEASE` is the version, and the client DSN comes
+from the `SENTRY_DSN_CLIENT_STAGING` or `SENTRY_DSN_CLIENT_PRODUCTION` Actions
+variable, one Sentry project each (public identifiers; unset means browser
+reporting is off). Every build sets `NEXT_PUBLIC_DISABLE_SIGNUP=true`;
+the owner account is created once through `/auth/setup`.
+
+`publish-policy` in Foundation quality pins
 this workflow's trigger, grants, scanner images and a SHA-256 of its parsed
 content (so any step change also edits the gate code), and rejects `${{ }}`
 inside its `run` scripts; it is the only workflow

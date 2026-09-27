@@ -193,7 +193,7 @@ function checkWorkflowScopes(root) {
 const toolPins = ["POSTGRES_IMAGE", "TRIVY_IMAGE", "SYFT_IMAGE", "BUILDKIT_IMAGE"];
 // Pins every step, order, env, `needs` and concurrency setting: the structural checks below explain
 // the intent, but reordering a push before its gate would otherwise pass them.
-const publishWorkflowHash = "5051093bb652463b82460911d47dc77905aa901e77830f5eea41432034a4a65b";
+const publishWorkflowHash = "f6adb7e3f91b1722b930ce985c5c09a8e788a9aa4f756eafdcdbe04f2e8e8a44";
 
 /** Formatting- and comment-independent form of a parsed workflow, for pinning. */
 function canonicalWorkflow(value) {
