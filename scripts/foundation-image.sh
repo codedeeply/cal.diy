@@ -61,6 +61,8 @@ for _ in {1..60}; do
   sleep 2
 done
 [[ "$healthy" == true ]]
+# The HEALTHCHECK only proves the server and database; this proves pages still render.
+docker exec "$task-web" node -e 'fetch("http://127.0.0.1:3000/auth/login").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
 docker exec "$task-web" node -e 'if(process.getuid()!==1000||process.arch!=="x64")process.exit(1);const fs=require("node:fs");for(const p of ["apps/web/server.js","apps/web/public","apps/web/.next/static"]){try{fs.accessSync(p,fs.constants.W_OK);process.exit(1)}catch(e){if(e.code!=="EACCES")throw e}}console.log("non-root, amd64, immutable application: PASS")' > "$EVIDENCE_DIR/runtime-assertion.txt"
 docker image inspect "$image" > "$EVIDENCE_DIR/image.json"
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$EVIDENCE_DIR:/out" "$SYFT_IMAGE" "docker:$image" -o cyclonedx-json=/out/sbom.cdx.json
