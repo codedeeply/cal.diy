@@ -55,9 +55,9 @@ docker exec "$task-web" node -e 'if(process.getuid()!==1000||process.arch!=="x64
 docker image inspect "$image" > "$EVIDENCE_DIR/image.json"
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$EVIDENCE_DIR:/out" "$SYFT_IMAGE" "docker:$image" -o cyclonedx-json=/out/sbom.cdx.json
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$EVIDENCE_DIR:/out" "$TRIVY_IMAGE" image --disable-telemetry --no-progress --scanners vuln --format json --output /out/trivy-image.json "$image"
-# The maintenance image carries the full build toolchain; the baseline ratchet covers only the
-# runner, so it is held to the publication threshold alone.
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$EVIDENCE_DIR:/out" "$TRIVY_IMAGE" image --disable-telemetry --no-progress --scanners vuln --format json --output /out/trivy-maintenance.json "$image-maintenance"
+# The maintenance image carries the full node_modules tree; the baseline ratchet covers only the
+# runner, so it is held to the publication threshold alone. Its size outlasts Trivy's 5-minute default.
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$EVIDENCE_DIR:/out" "$TRIVY_IMAGE" image --disable-telemetry --no-progress --timeout 20m --scanners vuln --format json --output /out/trivy-maintenance.json "$image-maintenance"
 docker run --rm -v "$PWD:/repo:ro" -v "$EVIDENCE_DIR:/out" "$TRIVY_IMAGE" config --format json --output /out/trivy-config.json /repo/Dockerfile
 docker run --rm -v "$PWD/yarn.lock:/scan/yarn.lock:ro" -v "$EVIDENCE_DIR:/out" "$TRIVY_IMAGE" fs --no-progress --scanners vuln --format json --output /out/trivy-lock.json /scan
 node scripts/foundation-gates.mjs config "$EVIDENCE_DIR/trivy-config.json"
