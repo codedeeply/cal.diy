@@ -125,7 +125,10 @@ ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000 NEXT_TELEMETRY_DISABLED=1
 USER node
 EXPOSE 3000
 
+# /api/health checks the database without rendering a page. /auth/login's server render fetches
+# NEXTAUTH_URL/api/auth/csrf through the public hostname, which behind a proxy or SSO fails and
+# hairpins out through the edge on every probe.
 HEALTHCHECK --interval=30s --timeout=30s --retries=5 \
-  CMD node -e 'fetch("http://127.0.0.1:3000/auth/login").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+  CMD node -e 'fetch("http://127.0.0.1:3000/api/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
 
 CMD ["/calcom/scripts/start-standalone.sh"]
