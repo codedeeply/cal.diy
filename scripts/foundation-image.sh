@@ -8,9 +8,11 @@ done
 [[ "$SLE119_RUN_ID" =~ ^[a-z0-9-]+$ ]] || exit 1
 # The image refuses to start at any URL but the one it was built for, so a release's version
 # suffix fixes where it may serve; required checks and unsuffixed releases build for localhost.
+# Browser code has no runtime environment either, so its Sentry environment and release follow
+# the version too; without a client DSN (required checks) browser reporting stays off.
 case "${VERSION:-}" in
-  *-stg) public_url=https://scheduling-stg.sierrathacker.me ;;
-  *) public_url=http://localhost:3000 ;;
+  *-stg) public_url=https://scheduling-stg.sierrathacker.me sentry_environment=staging ;;
+  *) public_url=http://localhost:3000 sentry_environment=production ;;
 esac
 task="sle119-$SLE119_RUN_ID"
 image="caldiy-sle119:$SLE119_RUN_ID"
@@ -38,6 +40,8 @@ docker buildx create --name "$task" --driver docker-container --driver-opt "netw
 build_args=(--build-arg DATABASE_URL=postgresql://postgres:postgres@localhost:5432/calendso
   --build-arg NEXT_PUBLIC_LICENSE_CONSENT=agree --build-arg CALCOM_TELEMETRY_DISABLED=1
   --build-arg "NEXT_PUBLIC_WEBAPP_URL=$public_url" --build-arg NEXT_PUBLIC_DISABLE_SIGNUP=true
+  --build-arg "NEXT_PUBLIC_SENTRY_ENVIRONMENT=$sentry_environment" --build-arg "NEXT_PUBLIC_SENTRY_RELEASE=${VERSION:-}"
+  --build-arg "NEXT_PUBLIC_SENTRY_DSN_CLIENT=${SENTRY_DSN_CLIENT:-}"
   --build-arg NEXTAUTH_SECRET=sle119-disposable-build-only
   --build-arg "CALENDSO_ENCRYPTION_KEY=$(openssl rand -hex 16)")
 docker buildx build --builder "$task" --platform linux/amd64 --target runner --load -t "$image" "${build_args[@]}" --metadata-file "$EVIDENCE_DIR/build-metadata.json" .

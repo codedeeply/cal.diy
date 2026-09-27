@@ -79,7 +79,11 @@ succeeded: a run that fails after a push can leave tags, signed or not, that
 are never handed over for deployment. Retry under a new version. The image serves exactly one URL, fixed by the
 version: `-stg` (for example `caldiy-2026.10.1-rc.2-stg`) builds for
 `https://scheduling-stg.sierrathacker.me`; any other version builds for
-`http://localhost:3000`. Every build sets `NEXT_PUBLIC_DISABLE_SIGNUP=true`;
+`http://localhost:3000`. The version also fixes the browser Sentry tags:
+`NEXT_PUBLIC_SENTRY_ENVIRONMENT` is `staging` for `-stg` and `production`
+otherwise, `NEXT_PUBLIC_SENTRY_RELEASE` is the version, and the client DSN comes
+from the `SENTRY_DSN_CLIENT` Actions variable (a public identifier; unset means
+browser reporting is off). Every build sets `NEXT_PUBLIC_DISABLE_SIGNUP=true`;
 the owner account is created once through `/auth/setup`.
 
 `publish-policy` in Foundation quality pins
