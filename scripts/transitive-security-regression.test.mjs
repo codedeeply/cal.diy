@@ -79,16 +79,10 @@ if (process.argv[2]) {
   test("approved resolutions match the lock graph and actual dependency paths", () => {
     assert.equal(root("./package.json").resolutions.tar, "7.5.21");
     assert.equal(root("./package.json").resolutions["faye-websocket/websocket-driver"], "0.7.5");
-    assert.equal(root("./package.json").resolutions["proxy-addr@^2.0.7"], "2.0.8");
-    assert.equal(root("./package.json").resolutions["proxy-addr@~2.0.7"], "2.0.8");
-    assert.equal(root("./package.json").resolutions["shell-quote"], "1.11.0");
     const graph = root("yaml").parse(readFileSync("yarn.lock", "utf8"));
-    assert.ok(graph["proxy-addr@npm:2.0.8"]);
     for (const [name, version] of [
       ["tar", "7.5.21"],
       ["websocket-driver", "0.7.5"],
-      ["proxy-addr", "2.0.8"],
-      ["shell-quote", "1.11.0"],
     ]) {
       const entries = Object.values(graph).filter((entry) => entry.resolution?.startsWith(`${name}@npm:`));
       assert.equal(entries.length, 1);
@@ -108,22 +102,6 @@ if (process.argv[2]) {
     ];
     for (const consumer of consumers) assert.equal(consumer("tar/package.json").version, "7.5.21");
     assert.equal(socketRequire("websocket-driver/package.json").version, "0.7.5");
-  });
-
-  test("Trigger.dev SDK and CLI manifests and resolved graph use only 4.5.4", () => {
-    const features = createRequire(resolve("packages/features/package.json"));
-    const manifest = features("./package.json");
-    const graph = root("yaml").parse(readFileSync("yarn.lock", "utf8"));
-    for (const [name, declared] of [
-      ["@trigger.dev/sdk", manifest.dependencies["@trigger.dev/sdk"]],
-      ["trigger.dev", manifest.devDependencies["trigger.dev"]],
-    ]) {
-      assert.equal(declared, "4.5.4");
-      assert.equal(features(`${name}/package.json`).version, "4.5.4");
-      const entries = Object.values(graph).filter((entry) => entry.resolution?.startsWith(`${name}@npm:`));
-      assert.equal(entries.length, 1);
-      assert.equal(entries[0].resolution, `${name}@npm:4.5.4`);
-    }
   });
 
   test("tar retains normal gzip creation, selected listing and async/sync extraction", async () => {

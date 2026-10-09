@@ -30,9 +30,9 @@ const trigger = via(features, "trigger.dev");
 const minimatch10 = via(trigger, "minimatch");
 
 const consumers = {
-  1: { minimatch: minimatch3, minimatchVersion: "3.1.5", braceVersion: "1.1.18" },
-  2: { minimatch: minimatch9, minimatchVersion: "9.0.9", braceVersion: "2.1.4" },
-  5: { minimatch: minimatch10, minimatchVersion: "10.2.5", braceVersion: "5.0.9" },
+  1: { minimatch: minimatch3, minimatchVersion: "3.1.5", braceVersion: "1.1.19" },
+  2: { minimatch: minimatch9, minimatchVersion: "9.0.9", braceVersion: "2.1.5" },
+  5: { minimatch: minimatch10, minimatchVersion: "10.2.5", braceVersion: "5.0.10" },
 };
 
 const modeTimeouts = {
@@ -153,11 +153,11 @@ if (process.argv[2]) {
         Object.entries(manifest.resolutions).filter(([selector]) => selector.startsWith("brace-expansion@"))
       ),
       {
-        "brace-expansion@^5.0.2": "5.0.9",
-        "brace-expansion@^5.0.5": "5.0.9",
-        "brace-expansion@^2.0.1": "2.1.4",
-        "brace-expansion@^2.0.2": "2.1.4",
-        "brace-expansion@^1.1.7": "1.1.18",
+        "brace-expansion@^5.0.2": "5.0.10",
+        "brace-expansion@^5.0.5": "5.0.10",
+        "brace-expansion@^2.0.1": "2.1.5",
+        "brace-expansion@^2.0.2": "2.1.5",
+        "brace-expansion@^1.1.7": "1.1.19",
       }
     );
     assert.equal(manifest.dependencies?.["brace-expansion"], undefined);
@@ -169,14 +169,14 @@ if (process.argv[2]) {
     assert.equal(glob7("glob/package.json").dependencies.minimatch, "^3.1.1");
     assert.equal(web("./package.json").devDependencies.glob, "10.4.5");
     assert.equal(glob10("glob/package.json").dependencies.minimatch, "^9.0.4");
-    assert.equal(features("./package.json").devDependencies["trigger.dev"], "4.3.2");
+    assert.equal(features("./package.json").devDependencies["trigger.dev"], "4.5.4");
     assert.equal(trigger("trigger.dev/package.json").dependencies.minimatch, "^10.0.1");
 
     const lock = readFileSync(resolve("yarn.lock"), "utf8");
     const versions = [...lock.matchAll(/^\s+resolution: "brace-expansion@npm:([^"]+)"$/gm)]
       .map((match) => match[1])
       .sort();
-    assert.deepEqual(versions, ["1.1.18", "2.1.4", "5.0.9"]);
+    assert.deepEqual(versions, ["1.1.19", "2.1.5", "5.0.10"]);
     assert.doesNotMatch(lock, /^\s+resolution: "brace-expansion@npm:(?:1\.1\.11|2\.0\.3|5\.0\.5)"$/m);
 
     for (const { minimatch, minimatchVersion, braceVersion } of Object.values(consumers)) {
