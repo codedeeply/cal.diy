@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -39,6 +40,16 @@ test("both auth consumers resolve the approved exact patch", () => {
     assert.equal(consumer("./package.json").dependencies["next-auth"], "4.24.15");
     assert.equal(consumer(join(dirname(consumer.resolve("next-auth")), "package.json")).version, "4.24.15");
   }
+});
+
+test("both direct consumers and the lock graph use patched Handlebars", () => {
+  for (const workspace of ["apps/web", "packages/features/auth"]) {
+    const consumer = createRequire(resolve(workspace, "package.json"));
+    assert.equal(consumer("./package.json").dependencies.handlebars, "4.7.10");
+  }
+  const lock = readFileSync(resolve("yarn.lock"), "utf8");
+  const versions = [...lock.matchAll(/^\s+resolution: "handlebars@npm:([^"]+)"$/gm)].map((match) => match[1]);
+  assert.deepEqual(versions, ["4.7.10"]);
 });
 
 test("malformed Bearer values fail closed without throwing", async () => {
