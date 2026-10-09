@@ -104,6 +104,22 @@ if (process.argv[2]) {
     assert.equal(socketRequire("websocket-driver/package.json").version, "0.7.5");
   });
 
+  test("Trigger.dev SDK and CLI manifests and resolved graph use only 4.5.4", () => {
+    const features = createRequire(resolve("packages/features/package.json"));
+    const manifest = features("./package.json");
+    const graph = root("yaml").parse(readFileSync("yarn.lock", "utf8"));
+    for (const [name, declared] of [
+      ["@trigger.dev/sdk", manifest.dependencies["@trigger.dev/sdk"]],
+      ["trigger.dev", manifest.devDependencies["trigger.dev"]],
+    ]) {
+      assert.equal(declared, "4.5.4");
+      assert.equal(features(`${name}/package.json`).version, "4.5.4");
+      const entries = Object.values(graph).filter((entry) => entry.resolution?.startsWith(`${name}@npm:`));
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].resolution, `${name}@npm:4.5.4`);
+    }
+  });
+
   test("tar retains normal gzip creation, selected listing and async/sync extraction", async () => {
     const directory = mkdtempSync(join(tmpdir(), "sle118-archive-"));
     try {
