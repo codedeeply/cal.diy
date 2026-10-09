@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const workspaces = {
-  "apps/web": "16.3.5",
+  "apps/web": "16.3.8",
   "apps/docs": "15.5.24",
   "packages/platform/examples/base": "16.3.5",
   "example-apps/credential-sync": "15.5.24",
