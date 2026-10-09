@@ -79,10 +79,16 @@ if (process.argv[2]) {
   test("approved resolutions match the lock graph and actual dependency paths", () => {
     assert.equal(root("./package.json").resolutions.tar, "7.5.21");
     assert.equal(root("./package.json").resolutions["faye-websocket/websocket-driver"], "0.7.5");
+    assert.equal(root("./package.json").resolutions["proxy-addr@^2.0.7"], "2.0.8");
+    assert.equal(root("./package.json").resolutions["proxy-addr@~2.0.7"], "2.0.8");
+    assert.equal(root("./package.json").resolutions["shell-quote"], "1.11.0");
     const graph = root("yaml").parse(readFileSync("yarn.lock", "utf8"));
+    assert.ok(graph["proxy-addr@npm:2.0.8"]);
     for (const [name, version] of [
       ["tar", "7.5.21"],
       ["websocket-driver", "0.7.5"],
+      ["proxy-addr", "2.0.8"],
+      ["shell-quote", "1.11.0"],
     ]) {
       const entries = Object.values(graph).filter((entry) => entry.resolution?.startsWith(`${name}@npm:`));
       assert.equal(entries.length, 1);
