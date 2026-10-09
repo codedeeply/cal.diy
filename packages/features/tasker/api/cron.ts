@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-
 import { TaskProcessor } from "../task-processor";
+import { isAuthorizedCronSecret } from "./isAuthorizedCronSecret";
 
 async function handler(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isAuthorizedCronSecret(authHeader)) {
     return new Response("Unauthorized", { status: 401 });
   }
   const processor = new TaskProcessor();
