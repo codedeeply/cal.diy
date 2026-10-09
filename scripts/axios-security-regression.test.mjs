@@ -170,13 +170,13 @@ if (process.argv[2] === "proxy") {
 } else if (process.argv[2] === "nested") {
   await inheritedNestedConfigRegression();
 } else {
-  test("Axios declarations, install and lock graph use exactly 1.18.0", { timeout: 5000 }, () => {
-    assert.equal(apiRequire(resolve("package.json")).resolutions.axios, "1.18.0");
-    assert.equal(apiRequire("./package.json").dependencies.axios, "1.18.0");
-    assert.equal(apiRequire("axios/package.json").version, "1.18.0");
+  test("Axios declarations, install and lock graph use exactly 1.20.0", { timeout: 5000 }, () => {
+    assert.equal(apiRequire(resolve("package.json")).resolutions.axios, "1.20.0");
+    assert.equal(apiRequire("./package.json").dependencies.axios, "1.20.0");
+    assert.equal(apiRequire("axios/package.json").version, "1.20.0");
     const lock = readFileSync(resolve("yarn.lock"), "utf8");
     const versions = [...lock.matchAll(/^\s+resolution: "axios@npm:([^"]+)"$/gm)].map((match) => match[1]);
-    assert.deepEqual(versions, ["1.18.0"]);
+    assert.deepEqual(versions, ["1.20.0"]);
   });
 
   test("inherited proxy cannot divert an interceptor-cloned request", { timeout: 7000 }, () => {
