@@ -93,6 +93,8 @@ WORKDIR /calcom
 # unfixed CVEs would otherwise block publication; migrate and seed need neither.
 COPY --from=builder /calcom ./
 RUN find node_modules -type d \( -name @depot -o -name @esbuild \) -prune -exec rm -rf {} +
+RUN rm -rf /usr/local/lib/node_modules/npm \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx
 COPY scripts ./scripts
 ENV DATABASE_URL=""
 ENV DATABASE_DIRECT_URL=""
